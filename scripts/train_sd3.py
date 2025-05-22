@@ -5,8 +5,11 @@ import mindspore as ms
 import mindspore.mint as mint
 import mindspore.nn as nn
 from mindone.diffusers import StableDiffusion3Pipeline
+from mindspore.dataset import GeneratorDataset
 
 from flow_grpo.util import requires_grad_
+from flow_grpo.scorer import MultiScorer
+from flow_grpo.dataset import TextPromptDataset
 
 
 def train(args: argparse.Namespace):
@@ -69,9 +72,29 @@ def train(args: argparse.Namespace):
                                  weight_decay=args.adam_weight_decay,
                                  eps=args.adam_epsilon)
 
+    # prepare prompt and reward fn
+    reward_fn = MultiScorer(args.reward_fn)
+
+    train_dataset = TextPromptDataset(args.dataset, 'train')
+    test_dataset = TextPromptDataset(args.dataset, 'test')
+
+    # TODO: create sampler (why need KSampler?)
+
+    # create dataloader
+    # # TODO: check shuffle works with sampler
+    train_dataloader = GeneratorDataset(train_dataset, shuffle=True)
+    train_dataloader = train_dataloader.batch(args.train_batch_size,
+                                              num_parallel_workers=1,
+                                              drop_remainder=True)
+
+    test_dataloader = GeneratorDataset(test_dataset, shuffle=False)
+    test_dataloader = test_dataloader.batch(args.test_batch_size,
+                                            num_parallel_workers=1,
+                                            drop_remainder=False)
+
 
 def main():
-    parser = argparse.ArgumentParser(usage="train sd3 with grpo")
+    parser = argparse.ArgumentParser(usage="train sd3 with GRPO")
     args = parser.parse_args()
 
     # TODO: hard coded, remove later
@@ -84,6 +107,10 @@ def main():
     args.adam_beta2 = 0.999
     args.adam_weight_decay = 1e-4
     args.adam_epsilon = 1e-8
+    args.reward_fn = {"jpeg_compressibility": 1}
+    args.dataset = "dataset/ocr"
+    args.train_batch_size = 4
+    args.test_batch_size = 4
 
 
 if __name__ == "__main__":

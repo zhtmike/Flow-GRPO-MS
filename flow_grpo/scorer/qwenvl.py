@@ -1,47 +1,33 @@
 import base64
 import re
 from io import BytesIO
-from typing import List
+from typing import List, Optional, Union
 
 import mindspore as ms
+import mindspore.nn as nn
+import numpy as np
 from mindone.transformers import Qwen2_5_VLForConditionalGeneration
 from PIL import Image
 from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor, Qwen2VLProcessor
 
+from .scorer import Scorer
+
 MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
 
 
-def pil_image_to_base64(image: Image.Image) -> str:
-    buffered = BytesIO()
-    image.save(buffered, format="PNG")
-    encoded_image_text = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    base64_qwen = f"data:image;base64,{encoded_image_text}"
-    return base64_qwen
-
-
-def extract_scores(output_text):
-    scores = []
-    for text in output_text:
-        match = re.search(r'<Score>(\d+)</Score>', text)
-        if match:
-            scores.append(float(match.group(1)) / 5)
-        else:
-            scores.append(0)
-    return scores
-
-
-class QwenVLScorer:
+class QwenVLScorer(Scorer):
 
     def __init__(self, dtype: ms.Type = ms.bfloat16) -> None:
         super().__init__()
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            MODEL,
-            torch_dtype=dtype,
-            attn_implementation="flash_attention_2",
-        )
+        with nn.no_init_parameters():
+            self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                MODEL,
+                mindspore_dtype=dtype,
+                attn_implementation="flash_attention_2",
+            )
         self.processor: Qwen2VLProcessor = AutoProcessor.from_pretrained(
-            MODEL, use_fast=True)
+            MODEL, use_fast=False)
         self.task = """
             Your role is to evaluate the aesthetic quality score of given images.
             1. Bad: Extremely blurry, underexposed with significant noise, indiscernible subjects, and chaotic composition.
@@ -57,8 +43,12 @@ class QwenVLScorer:
             <Score>X</Score>
         """
 
-    def __call__(self, images: List[Image.Image]):
-        images_base64 = [pil_image_to_base64(image) for image in images]
+    def __call__(self,
+                 images: Union[List[Image.Image], np.ndarray],
+                 prompts: Optional[List[str]] = None) -> List[float]:
+        if isinstance(images, np.ndarray):
+            images = self.array_to_images(images)
+        images_base64 = [self.pil_image_to_base64(image) for image in images]
         messages = []
         for base64_qwen in images_base64:
             messages.append([
@@ -106,15 +96,35 @@ class QwenVLScorer:
             generated_ids_trimmed,
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False)
-        rewards = extract_scores(output_texts)
+        rewards = self.extract_scores(output_texts)
         return rewards
+
+    @staticmethod
+    def pil_image_to_base64(image: Image.Image) -> str:
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        encoded_image_text = base64.b64encode(
+            buffered.getvalue()).decode("utf-8")
+        base64_qwen = f"data:image;base64,{encoded_image_text}"
+        return base64_qwen
+
+    @staticmethod
+    def extract_scores(output_text: List[str]) -> List[float]:
+        scores = []
+        for text in output_text:
+            match = re.search(r'<Score>(\d+)</Score>', text)
+            if match:
+                scores.append(float(match.group(1)) / 5)
+            else:
+                scores.append(0)
+        return scores
 
 
 def test_qwen_vl_scorer():
     scorer = QwenVLScorer(dtype=ms.bfloat16)
-    images = ["../../assets/demo.jpg"]
+    images = ["assets/good.jpg", "assets/bad.jpg"]
     pil_images = [Image.open(img) for img in images]
-    print(scorer(None, pil_images))
+    print(scorer(images=pil_images))
 
 
 if __name__ == "__main__":
