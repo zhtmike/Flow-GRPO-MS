@@ -29,7 +29,7 @@ class QwenVLScorer(Scorer):
                 attn_implementation="flash_attention_2",
             )
         self.processor: Qwen2VLProcessor = AutoProcessor.from_pretrained(
-            model_path, use_fast=False)
+            model_path, use_fast=False, padding_side="left")
         self.task = """
             Your role is to evaluate the aesthetic quality score of given images.
             1. Bad: Extremely blurry, underexposed with significant noise, indiscernible subjects, and chaotic composition.
