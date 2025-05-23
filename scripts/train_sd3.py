@@ -7,9 +7,9 @@ import mindspore.nn as nn
 from mindone.diffusers import StableDiffusion3Pipeline
 from mindspore.dataset import GeneratorDataset
 
-from flow_grpo.util import requires_grad_
-from flow_grpo.scorer import MultiScorer
 from flow_grpo.dataset import TextPromptDataset
+from flow_grpo.scorer import MultiScorer
+from flow_grpo.util import requires_grad_
 
 
 def train(args: argparse.Namespace):

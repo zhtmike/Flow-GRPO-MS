@@ -1,4 +1,5 @@
 import base64
+import os
 import re
 from io import BytesIO
 from typing import List, Optional, Union
@@ -6,7 +7,6 @@ from typing import List, Optional, Union
 import mindspore as ms
 import mindspore.nn as nn
 import numpy as np
-import os
 from mindone.transformers import Qwen2_5_VLForConditionalGeneration
 from PIL import Image
 from qwen_vl_utils import process_vision_info
@@ -15,6 +15,7 @@ from transformers import AutoProcessor, Qwen2VLProcessor
 from .scorer import Scorer
 
 DEFAULT_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
+
 
 class QwenVLScorer(Scorer):
 
