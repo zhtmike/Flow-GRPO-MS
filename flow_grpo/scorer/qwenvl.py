@@ -13,7 +13,8 @@ from transformers import AutoProcessor, Qwen2VLProcessor
 
 from .scorer import Scorer
 
-MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
+# MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
+MODEL = "Qwen/Qwen2.5-VL-3B-Instruct"
 
 
 class QwenVLScorer(Scorer):
