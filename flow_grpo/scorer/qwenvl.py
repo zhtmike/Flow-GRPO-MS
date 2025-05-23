@@ -6,6 +6,7 @@ from typing import List, Optional, Union
 import mindspore as ms
 import mindspore.nn as nn
 import numpy as np
+import os
 from mindone.transformers import Qwen2_5_VLForConditionalGeneration
 from PIL import Image
 from qwen_vl_utils import process_vision_info
@@ -13,22 +14,21 @@ from transformers import AutoProcessor, Qwen2VLProcessor
 
 from .scorer import Scorer
 
-# MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
-MODEL = "Qwen/Qwen2.5-VL-3B-Instruct"
-
+DEFAULT_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
 
 class QwenVLScorer(Scorer):
 
     def __init__(self, dtype: ms.Type = ms.bfloat16) -> None:
         super().__init__()
+        model_path = os.environ.get("QWEN_VL_PATH", DEFAULT_MODEL)
         with nn.no_init_parameters():
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                MODEL,
+                model_path,
                 mindspore_dtype=dtype,
                 attn_implementation="flash_attention_2",
             )
         self.processor: Qwen2VLProcessor = AutoProcessor.from_pretrained(
-            MODEL, use_fast=False)
+            model_path, use_fast=False)
         self.task = """
             Your role is to evaluate the aesthetic quality score of given images.
             1. Bad: Extremely blurry, underexposed with significant noise, indiscernible subjects, and chaotic composition.
