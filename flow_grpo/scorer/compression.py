@@ -24,7 +24,7 @@ class JpegCompressibilityScorer(Scorer):
 
 def test_jpeg_compressibility_scorer():
     scorer = JpegCompressibilityScorer()
-    images = ["assets/good.jpg", "assets/bad.jpg"]
+    images = ["assets/good.jpg", "assets/fair.jpg", "assets/poor.jpg"]
     pil_images = [Image.open(img) for img in images]
     print(scorer(images=pil_images))
 

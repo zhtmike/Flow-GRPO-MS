@@ -124,7 +124,7 @@ class QwenVLScorer(Scorer):
 
 def test_qwen_vl_scorer():
     scorer = QwenVLScorer(dtype=ms.bfloat16)
-    images = ["assets/good.jpg", "assets/bad.jpg"]
+    images = ["assets/good.jpg", "assets/fair.jpg", "assets/poor.jpg"]
     pil_images = [Image.open(img) for img in images]
     print(scorer(images=pil_images))
 
