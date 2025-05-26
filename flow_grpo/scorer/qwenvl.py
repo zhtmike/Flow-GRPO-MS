@@ -46,7 +46,7 @@ class QwenVLScorer(Scorer):
         """
 
     def __call__(self,
-                 images: Union[List[Image.Image], np.ndarray],
+                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
                  prompts: Optional[List[str]] = None) -> List[float]:
         if isinstance(images, np.ndarray):
             images = self.array_to_images(images)

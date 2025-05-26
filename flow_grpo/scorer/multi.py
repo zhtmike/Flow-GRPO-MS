@@ -1,7 +1,7 @@
 import importlib
-import io
 from typing import Dict, List, Optional, Union
 
+import mindspore as ms
 import numpy as np
 from PIL import Image
 
@@ -30,7 +30,7 @@ class MultiScorer(Scorer):
 
     def __call__(
             self,
-            images: Union[List[Image.Image], np.ndarray],
+            images: Union[List[Image.Image], np.ndarray, ms.Tensor],
             prompts: Optional[List[str]] = None) -> Dict[str, List[float]]:
         score_details = dict()
         total_scores = list()

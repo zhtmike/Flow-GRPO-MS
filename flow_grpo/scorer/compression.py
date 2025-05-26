@@ -1,6 +1,7 @@
 import io
 from typing import List, Optional, Union
 
+import mindspore as ms
 import numpy as np
 from PIL import Image
 
@@ -10,9 +11,9 @@ from .scorer import Scorer
 class JpegCompressibilityScorer(Scorer):
 
     def __call__(self,
-                 images: Union[List[Image.Image], np.ndarray],
+                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
                  prompts: Optional[List[str]] = None) -> List[float]:
-        if isinstance(images, np.ndarray):
+        if isinstance(images, (np.ndarray, ms.Tensor)):
             images = self.array_to_images(images)
         buffers = [io.BytesIO() for _ in images]
         for image, buffer in zip(images, buffers):
