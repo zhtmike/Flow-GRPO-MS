@@ -1,4 +1,5 @@
 import base64
+import os
 import re
 from io import BytesIO
 from typing import List, Optional, Union
@@ -13,21 +14,22 @@ from transformers import AutoProcessor, Qwen2VLProcessor
 
 from .scorer import Scorer
 
-MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
+DEFAULT_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
 
 
 class QwenVLScorer(Scorer):
 
     def __init__(self, dtype: ms.Type = ms.bfloat16) -> None:
         super().__init__()
+        model_path = os.environ.get("QWEN_VL_PATH", DEFAULT_MODEL)
         with nn.no_init_parameters():
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                MODEL,
+                model_path,
                 mindspore_dtype=dtype,
                 attn_implementation="flash_attention_2",
             )
         self.processor: Qwen2VLProcessor = AutoProcessor.from_pretrained(
-            MODEL, use_fast=False)
+            model_path, use_fast=False, padding_side="left")
         self.task = """
             Your role is to evaluate the aesthetic quality score of given images.
             1. Bad: Extremely blurry, underexposed with significant noise, indiscernible subjects, and chaotic composition.
@@ -122,7 +124,7 @@ class QwenVLScorer(Scorer):
 
 def test_qwen_vl_scorer():
     scorer = QwenVLScorer(dtype=ms.bfloat16)
-    images = ["assets/good.jpg", "assets/bad.jpg"]
+    images = ["assets/good.jpg", "assets/fair.jpg", "assets/poor.jpg"]
     pil_images = [Image.open(img) for img in images]
     print(scorer(images=pil_images))
 

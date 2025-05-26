@@ -7,9 +7,12 @@ import mindspore.nn as nn
 from mindone.diffusers import StableDiffusion3Pipeline
 from mindspore.dataset import GeneratorDataset
 
-from flow_grpo.util import requires_grad_
-from flow_grpo.scorer import MultiScorer
 from flow_grpo.dataset import TextPromptDataset
+from flow_grpo.scorer import MultiScorer
+from flow_grpo.util import requires_grad_
+
+from flow_grpo.diffusers_patch.text_patch import encode_prompt
+
 
 
 def train(args: argparse.Namespace):
@@ -91,6 +94,24 @@ def train(args: argparse.Namespace):
     test_dataloader = test_dataloader.batch(args.test_batch_size,
                                             num_parallel_workers=1,
                                             drop_remainder=False)
+    
+    neg_prompt_embed, neg_pooled_prompt_embed = encode_prompt([""], text_encoders, tokenizers, max_sequence_length=128)
+
+    sample_neg_prompt_embeds = neg_prompt_embed.repeat(args.train_batch_size, 1, 1)
+    train_neg_prompt_embeds = neg_prompt_embed.repeat(args.train_batch_size, 1, 1)
+    sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(args.train_batch_size, 1)
+    train_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(args.train_batch_size, 1)
+
+    # Train!
+    samples_per_epoch = (
+        args.train_batch_size
+        * args.num_batches_per_epoch
+    )
+    total_train_batch_size = (
+        args.train_batch_size
+        * args.gradient_accumulation_steps
+    )
+
 
 
 def main():
@@ -109,8 +130,11 @@ def main():
     args.adam_epsilon = 1e-8
     args.reward_fn = {"jpeg_compressibility": 1}
     args.dataset = "dataset/ocr"
-    args.train_batch_size = 4
+    args.train_batch_size = 8
     args.test_batch_size = 4
+    args.num_batches_per_epoch = 4
+    args.num_image_per_prompt = 1
+    args.gradient_accumulation_steps = 1
 
 
 if __name__ == "__main__":

@@ -54,7 +54,7 @@ class MultiScorer(Scorer):
 def test_multi_scorer():
     scorers = {"jpeg_compressibility": 1.0}
     scorer = MultiScorer(scorers)
-    images = ["assets/good.jpg", "assets/bad.jpg"]
+    images = ["assets/good.jpg", "assets/fair.jpg", "assets/poor.jpg"]
     pil_images = [Image.open(img) for img in images]
     print(scorer(images=pil_images))
 
