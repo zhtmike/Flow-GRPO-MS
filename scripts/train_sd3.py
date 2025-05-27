@@ -9,22 +9,25 @@ from functools import partial
 import mindspore as ms
 import mindspore.mint as mint
 import mindspore.nn as nn
+import mindspore.ops as ops
 import numpy as np
-from mindone.diffusers import (AutoencoderKL, SD3Transformer2DModel,
-                               StableDiffusion3Pipeline)
+from mindone.diffusers import (AutoencoderKL, FlowMatchEulerDiscreteScheduler,
+                               SD3Transformer2DModel, StableDiffusion3Pipeline)
+from mindone.diffusers._peft import LoraConfig, PeftModel, get_peft_model
 from mindone.diffusers.training_utils import pynative_no_grad
 from mindone.transformers import CLIPTextModelWithProjection, T5EncoderModel
 from mindspore.dataset import GeneratorDataset
 from tqdm import tqdm
 from transformers import CLIPTextConfig, T5Config
 
-from flow_grpo.dataset import TextPromptDataset
+from flow_grpo.dataset import DistributedKRepeatSampler, TextPromptDataset
 from flow_grpo.diffusers_patch.sd3_pipeline_with_logprob import \
     pipeline_with_logprob
 from flow_grpo.diffusers_patch.sd3_sde_with_logprob import \
     sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_sd3 import encode_prompt
 from flow_grpo.scorer import MultiScorer
+from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.util import requires_grad_
 
 DEFAULT_MODEL = "stabilityai/stable-diffusion-3.5-medium"
@@ -72,10 +75,12 @@ def init_debug_pipeline(args: argparse.Namespace) -> StableDiffusion3Pipeline:
 
 class NetWithLoss(nn.Cell):
 
-    def __init__(self, transformer, pipeline, args):
+    def __init__(self, transformer: SD3Transformer2DModel,
+                 scheduler: FlowMatchEulerDiscreteScheduler,
+                 args: argparse.Namespace) -> None:
         super().__init__()
         self.transformer = transformer
-        self.pipeline = pipeline
+        self.scheduler = scheduler
         self.args = args
 
     def compute_log_prob(self, latents, next_latents, timesteps, embeds,
@@ -102,7 +107,7 @@ class NetWithLoss(nn.Cell):
 
         # compute the log prob of next_latents given latents under the current model
         prev_sample, log_prob, prev_sample_mean, std_dev_t = sde_step_with_logprob(
-            self.pipeline.scheduler,
+            self.scheduler,
             noise_pred.float(),
             timesteps,
             latents.float(),
@@ -120,7 +125,7 @@ class NetWithLoss(nn.Cell):
             sigma_prev)
         if self.args.beta > 0:
             with pynative_no_grad():
-                with self.transformer.module.disable_adapter():
+                with self.transformer.disable_adapter():
                     _, _, prev_sample_mean_ref, _ = self.compute_log_prob(
                         latents, next_latents, timesteps, embeds,
                         pooled_embeds, sigma, sigma_prev)
@@ -139,8 +144,9 @@ class NetWithLoss(nn.Cell):
         )
         policy_loss = mint.mean(mint.maximum(unclipped_loss, clipped_loss))
         if self.args.beta > 0:
-            kl_loss = ((prev_sample_mean - prev_sample_mean_ref)**2).mean(
-                dim=(1, 2, 3), keepdim=True) / (2 * std_dev_t**2)
+            kl_loss = (
+                (prev_sample_mean - ops.stop_gradient(prev_sample_mean_ref))**
+                2).mean(dim=(1, 2, 3), keepdim=True) / (2 * std_dev_t**2)
             kl_loss = mint.mean(kl_loss)
             loss = policy_loss + self.args.beta * kl_loss
         else:
@@ -149,9 +155,57 @@ class NetWithLoss(nn.Cell):
         return loss
 
 
-def evaluate(*args, **kwargs):
-    # TODO: to be implemented
-    ...
+def evaluate(pipeline_with_logprob_, args, test_iter, pipeline, text_encoders,
+             tokenizers, sample_neg_prompt_embeds,
+             sample_neg_pooled_prompt_embeds, outdir):
+    if not os.path.isdir(outdir):
+        os.makedirs(outdir)
+    total_prompts = list()
+    for i, test_batch in tqdm_(
+            enumerate(test_iter),
+            desc="Eval: ",
+            position=0,
+    ):
+        prompts = test_batch["prompt"].tolist()
+        prompt_embeds, pooled_prompt_embeds = encode_prompt(
+            text_encoders,
+            tokenizers,
+            prompts,
+            max_sequence_length=128,
+        )
+        if len(prompt_embeds) < len(sample_neg_prompt_embeds):
+            sample_neg_prompt_embeds = sample_neg_prompt_embeds[:len(
+                prompt_embeds)]
+            sample_neg_pooled_prompt_embeds = sample_neg_pooled_prompt_embeds[:len(
+                prompt_embeds)]
+        images, _, _, _ = pipeline_with_logprob_(
+            pipeline,
+            prompt_embeds=prompt_embeds,
+            pooled_prompt_embeds=pooled_prompt_embeds,
+            negative_prompt_embeds=sample_neg_prompt_embeds,
+            negative_pooled_prompt_embeds=sample_neg_pooled_prompt_embeds,
+            num_inference_steps=args.eval_num_steps,
+            guidance_scale=args.guidance_scale,
+            output_type="pil",
+            return_dict=False,
+            height=args.resolution,
+            width=args.resolution,
+            determistic=True,
+        )
+        for j, (prompt, image) in enumerate(zip(prompts, images)):
+            num = i * len(images) + j
+            if num >= args.visual_num:
+                break
+            fname = f"{num}.jpg"
+            total_prompts.append((fname, prompt))
+            image.save(os.path.join(outdir, fname))
+        else:
+            continue
+        break
+    with open(os.path.join(outdir, "prompt.txt"), "w") as f:
+        for fname, prompt in total_prompts:
+            f.write(f"{fname},{prompt}\n")
+    return
 
 
 def save_checkpoint(*args, **kwargs):
@@ -160,11 +214,29 @@ def save_checkpoint(*args, **kwargs):
 
 
 def train(args: argparse.Namespace):
+    # TODO: hardcoded for mimicing distributed training
+    num_processes = 1
+    process_index = 0
+
     unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
-    run_name = unique_id
+    if not args.run_name:
+        args.run_name = unique_id
+    else:
+        args.run_name += "_" + unique_id
+    output_dir = os.path.join("output", args.run_name)
+
+    if args.resume_from:
+        # TODO: support resume from
+        raise NotImplementedError()
 
     # number of timesteps within each trajectory to train on
     num_train_timesteps = int(args.num_steps * args.timestep_fraction)
+
+    logger.info(f"\n{args}")
+
+    # set seed (device_specific is very important to get different prompts on different devices)
+    # TODO: set device_specifig seed, will it affect lora model initialization?
+    ms.set_seed(args.seed)
 
     # load scheduler, tokenizer and models.
     if args.debug:
@@ -180,7 +252,7 @@ def train(args: argparse.Namespace):
     requires_grad_(pipeline.text_encoder, False)
     requires_grad_(pipeline.text_encoder_2, False)
     requires_grad_(pipeline.text_encoder_3, False)
-    requires_grad_(pipeline.transformer, True)  # TODO: set to False for LoRA
+    requires_grad_(pipeline.transformer, not args.use_lora)
 
     text_encoders = [
         pipeline.text_encoder, pipeline.text_encoder_2, pipeline.text_encoder_3
@@ -213,16 +285,57 @@ def train(args: argparse.Namespace):
     pipeline.text_encoder.to(inference_dtype)
     pipeline.text_encoder_2.to(inference_dtype)
     pipeline.text_encoder_3.to(inference_dtype)
-    pipeline.transformer = ms.amp.auto_mixed_precision(pipeline.transformer,
-                                                       amp_level="auto",
-                                                       dtype=inference_dtype)
 
-    transformer: nn.Cell = pipeline.transformer
-    transformer_trainable_parameters = list(
-        filter(lambda p: p.requires_grad, transformer.get_parameters()))
+    if args.use_lora:
+        # Set correct lora layers
+        target_modules = [
+            "attn.add_k_proj",
+            "attn.add_q_proj",
+            "attn.add_v_proj",
+            "attn.to_add_out",
+            "attn.to_k",
+            "attn.to_out.0",
+            "attn.to_q",
+            "attn.to_v",
+        ]
+        transformer_lora_config = LoraConfig(
+            r=32,
+            lora_alpha=64,
+            init_lora_weights="gaussian",
+            target_modules=target_modules,
+        )
+        if args.lora_path:
+            pipeline.transformer = PeftModel.from_pretrained(
+                pipeline.transformer, args.lora_path)
+            pipeline.transformer.set_adapter("default")
+        else:
+            pipeline.transformer = get_peft_model(pipeline.transformer,
+                                                  transformer_lora_config)
+
+    trainable_parameters = list(
+        filter(lambda p: p.requires_grad,
+               pipeline.transformer.get_parameters()))
+
+    # print model size
+    transformer_params = sum(
+        [param.size for param in pipeline.transformer.get_parameters()])
+    vae_params = sum([param.size for param in pipeline.vae.get_parameters()])
+    text_encoder_params = sum(
+        [param.size for param in pipeline.text_encoder.get_parameters()])
+    text_encoder_2_params = sum(
+        [param.size for param in pipeline.text_encoder_2.get_parameters()])
+    text_encoder_3_params = sum(
+        [param.size for param in pipeline.text_encoder_3.get_parameters()])
+    total_params = transformer_params + vae_params + text_encoder_params + text_encoder_2_params + text_encoder_3_params
+    trainable_params = sum([param.size for param in trainable_parameters])
+
+    logger.info(
+        f"total parameter: {total_params:,} (transformer: {transformer_params:,}, vae: {vae_params:,}, tex_encoder: {text_encoder_params:,}, text_encoder_2: {text_encoder_2_params:,}, text_encoder_3: {text_encoder_3_params:,})"
+    )
+    logger.info(f"total trainable parameter: {trainable_params:,}")
 
     # TODO: add EMA
-    optimizer = mint.optim.AdamW(transformer_trainable_parameters,
+    optimizer = mint.optim.AdamW(trainable_parameters,
                                  lr=args.learning_rate,
                                  betas=(args.adam_beta1, args.adam_beta2),
                                  weight_decay=args.adam_weight_decay,
@@ -232,21 +345,25 @@ def train(args: argparse.Namespace):
     reward_fn = MultiScorer(args.reward_fn)
 
     train_dataset = TextPromptDataset(args.dataset, 'train')
-    test_dataset = TextPromptDataset(args.dataset, 'test')
-
-    # TODO: create sampler (why need KSampler?)
+    test_dataset = TextPromptDataset(args.dataset,
+                                     'test',
+                                     max_num=args.visual_num)
+    train_sampler = DistributedKRepeatSampler(dataset=train_dataset,
+                                              batch_size=args.train_batch_size,
+                                              k=args.num_image_per_prompt,
+                                              num_replicas=num_processes,
+                                              rank=process_index,
+                                              seed=args.seed)
 
     # create dataloader
-    # # TODO: check shuffle works with sampler
     train_dataloader = GeneratorDataset(train_dataset,
                                         column_names="prompt",
-                                        shuffle=True)
-    train_dataloader = train_dataloader.batch(args.train_batch_size,
-                                              num_parallel_workers=1,
-                                              drop_remainder=True)
+                                        batch_sampler=train_sampler,
+                                        num_parallel_workers=1)
 
     test_dataloader = GeneratorDataset(test_dataset,
                                        column_names="prompt",
+                                       num_parallel_workers=1,
                                        shuffle=False)
     test_dataloader = test_dataloader.batch(args.test_batch_size,
                                             num_parallel_workers=1,
@@ -259,19 +376,26 @@ def train(args: argparse.Namespace):
                                                        1, 1)
     train_neg_prompt_embeds = neg_prompt_embed.repeat(args.train_batch_size, 1,
                                                       1)
-
-    # executor to perform callbacks asynchronously. this is beneficial for the llava callbacks which makes a request to a
-    # remote server running llava inference.
-    executor = futures.ThreadPoolExecutor(max_workers=8)
-
     sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(
         args.train_batch_size, 1)
     train_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(
         args.train_batch_size, 1)
 
+    if args.num_image_per_prompt == 1:
+        args.per_prompt_stat_tracking = False
+
+    # initialize stat tracker
+    if args.per_prompt_stat_tracking:
+        stat_tracker = PerPromptStatTracker(args.global_std)
+
+    # executor to perform callbacks asynchronously. this is beneficial for the llava callbacks which makes a request to a
+    # remote server running llava inference.
+    executor = futures.ThreadPoolExecutor(max_workers=8)
+
     # Train!
-    samples_per_epoch = (args.train_batch_size * args.num_batches_per_epoch)
-    total_train_batch_size = (args.train_batch_size *
+    samples_per_epoch = (args.train_batch_size * num_processes *
+                         args.num_batches_per_epoch)
+    total_train_batch_size = (args.train_batch_size * num_processes *
                               args.gradient_accumulation_steps)
 
     logger.info("***** Running training *****")
@@ -289,12 +413,24 @@ def train(args: argparse.Namespace):
     )
     logger.info(f"  Number of inner epochs = {args.num_inner_epochs}")
 
-    first_epoch = 0
+    if args.resume_from:
+        raise NotImplementedError()
+    else:
+        first_epoch = 0
     global_step = 0
     train_iter = train_dataloader.create_dict_iterator(output_numpy=True)
+    test_iter = test_dataloader.create_dict_iterator(output_numpy=True)
 
-    loss_and_grad_fn = ms.value_and_grad(NetWithLoss(transformer, pipeline,
-                                                     args),
+    pipeline_with_logprob_ = ms.amp.auto_mixed_precision(pipeline_with_logprob,
+                                                         amp_level="auto",
+                                                         dtype=inference_dtype)
+
+    net_with_loss = NetWithLoss(pipeline.transformer, pipeline.scheduler, args)
+    net_with_loss = ms.amp.auto_mixed_precision(net_with_loss,
+                                                amp_level="auto",
+                                                dtype=inference_dtype)
+
+    loss_and_grad_fn = ms.value_and_grad(net_with_loss,
                                          grad_position=None,
                                          weights=optimizer.parameters)
 
@@ -302,10 +438,9 @@ def train(args: argparse.Namespace):
         #################### SAMPLING ####################
         pipeline.transformer.set_train(False)
         samples = []
-        for i in tqdm(range(args.num_batches_per_epoch),
-                      desc=f"Epoch {epoch}: sampling",
-                      position=0):
-
+        for i in tqdm_(range(args.num_batches_per_epoch),
+                       desc=f"Epoch {epoch}: sampling",
+                       position=0):
             prompts = next(train_iter)["prompt"].tolist()
 
             prompt_embeds, pooled_prompt_embeds = encode_prompt(
@@ -321,12 +456,15 @@ def train(args: argparse.Namespace):
                 truncation=True,
                 return_tensors="np",
             ).input_ids
-            if i == 0 and epoch % args.eval_freq == 0 and epoch > 0:
-                evaluate()
+            if i == 0 and epoch % args.eval_freq == 0:
+                outdir = os.path.join(output_dir, "visual", f"epoch_{epoch}")
+                evaluate(pipeline_with_logprob_, args, test_iter, pipeline,
+                         text_encoders, tokenizers, sample_neg_prompt_embeds,
+                         sample_neg_pooled_prompt_embeds, outdir)
             if i == 0 and epoch % args.save_freq == 0 and epoch > 0:
                 save_checkpoint()
 
-            images, latents, log_probs, kls = pipeline_with_logprob(
+            images, latents, log_probs, kls = pipeline_with_logprob_(
                 pipeline,
                 prompt_embeds=prompt_embeds,
                 pooled_prompt_embeds=pooled_prompt_embeds,
@@ -334,17 +472,19 @@ def train(args: argparse.Namespace):
                 negative_pooled_prompt_embeds=sample_neg_pooled_prompt_embeds,
                 num_inference_steps=args.num_steps,
                 guidance_scale=args.guidance_scale,
-                output_type="ms",
+                output_type="np",
                 return_dict=False,
                 height=args.resolution,
                 width=args.resolution,
                 kl_reward=args.kl_reward)
 
             latents = mint.stack(
-                latents, dim=1)  # (batch_size, num_steps + 1, 16, 96, 96)
+                latents,
+                dim=1).numpy()  # (batch_size, num_steps + 1, 16, 96, 96)
             log_probs = mint.stack(
-                log_probs, dim=1)  # shape after stack (batch_size, num_steps)
-            kls = mint.stack(kls, dim=1)
+                log_probs,
+                dim=1).numpy()  # shape after stack (batch_size, num_steps)
+            kls = mint.stack(kls, dim=1).numpy()
 
             timesteps = pipeline.scheduler.timesteps.repeat(
                 args.train_batch_size, 1)  # (batch_size, num_steps)
@@ -355,10 +495,10 @@ def train(args: argparse.Namespace):
             time.sleep(0)
 
             samples.append({
-                "prompt_ids": ms.tensor(prompt_ids),
-                "prompt_embeds": prompt_embeds,
-                "pooled_prompt_embeds": pooled_prompt_embeds,
-                "timesteps": timesteps,
+                "prompt_ids": prompt_ids,
+                "prompt_embeds": prompt_embeds.numpy(),
+                "pooled_prompt_embeds": pooled_prompt_embeds.numpy(),
+                "timesteps": timesteps.numpy(),
                 "latents":
                 latents[:, :-1],  # each entry is the latent before timestep t
                 "next_latents":
@@ -369,54 +509,59 @@ def train(args: argparse.Namespace):
             })
 
         # wait for all rewards to be computed
-        for sample in tqdm(samples, desc="Waiting for rewards", position=0):
+        for sample in tqdm_(samples, desc="Waiting for rewards", position=0):
             rewards = sample["rewards"].result()
-            sample["rewards"] = {
-                key: ms.tensor(value, dtype=ms.float32)
-                for key, value in rewards.items()
-            }
+            sample["rewards"] = rewards
 
         # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
         samples = {
-            k: mint.cat([s[k] for s in samples], dim=0)
+            k: np.concatenate([s[k] for s in samples], axis=0)
             if not isinstance(samples[0][k], dict) else {
-                sub_key: mint.cat([s[k][sub_key] for s in samples], dim=0)
+                sub_key: np.concatenate([s[k][sub_key] for s in samples],
+                                        axis=0)
                 for sub_key in samples[0][k]
             }
             for k in samples[0].keys()
         }
 
         samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
-        samples["rewards"]["avg"] = samples["rewards"]["avg"].unsqueeze(
-            -1) - args.kl_reward * samples["kl"]
+        samples["rewards"]["avg"] = samples["rewards"]["avg"][
+            ..., None] - args.kl_reward * samples["kl"]
         # TODO: gather rewards across processes
-        gathered_rewards = {
-            key: value.numpy()
-            for key, value in samples["rewards"].items()
-        }
+        gathered_rewards = samples["rewards"]
 
-        advantages = (gathered_rewards['avg'] - gathered_rewards['avg'].mean()
-                      ) / (gathered_rewards['avg'].std() + 1e-4)
+        # per-prompt mean/std tracking
+        if args.per_prompt_stat_tracking:
+            # gather the prompts across processes
+            prompt_ids = samples["prompt_ids"]
+            prompts = pipeline.tokenizer.batch_decode(prompt_ids,
+                                                      skip_special_tokens=True)
+            advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
+            stat_tracker.clear()
+        else:
+            advantages = (gathered_rewards['avg'] -
+                          gathered_rewards['avg'].mean()) / (
+                              gathered_rewards['avg'].std() + 1e-4)
 
         # TODO: ungather advantages
-        advantages = ms.tensor(advantages)
+        advantages = advantages.astype(np.float32)
         samples["advantages"] = advantages.reshape(-1, advantages.shape[-1])
 
         del samples["rewards"]
         del samples["prompt_ids"]
 
         # Get the mask for samples where all advantages are zero across the time dimension
-        mask = (samples["advantages"].abs().sum(dim=1) != 0)
+        mask = (np.abs(samples["advantages"]).sum(axis=1) != 0)
 
         # If the number of True values in mask is not divisible by config.sample.num_batches_per_epoch,
         # randomly change some False values to True to make it divisible
         num_batches = args.num_batches_per_epoch
         true_count = mask.sum()
         if true_count % num_batches != 0:
-            false_indices = mint.where(~mask)[0]
+            false_indices = np.where(~mask)[0]
             num_to_change = num_batches - (true_count % num_batches)
             if len(false_indices) >= num_to_change:
-                random_indices = mint.randperm(
+                random_indices = np.random.permutation(
                     len(false_indices))[:num_to_change]
                 mask[false_indices[random_indices]] = True
 
@@ -433,22 +578,22 @@ def train(args: argparse.Namespace):
                 f"reward_{key}": value.mean().item()
                 for key, value in gathered_rewards.items() if '_strict_accuracy' not in key and '_accuracy' not in key
             }, "kl": samples["kl"].mean().item(),
-            "advantages": samples["advantages"].abs().mean().item(),
+            "advantages": np.abs(samples["advantages"]).mean().item(),
             "actual_batch_size": mask.sum().item() // num_batches
         })
 
         #################### TRAINING ####################
         for inner_epoch in range(args.num_inner_epochs):
             # shuffle samples along batch dimension
-            perm = mint.randperm(total_batch_size)
+            perm = np.random.permutation(total_batch_size)
             samples = {k: v[perm] for k, v in samples.items()}
 
             # shuffle along time dimension independently for each sample
-            perms = mint.stack(
-                [mint.arange(num_timesteps) for _ in range(total_batch_size)])
+            perms = np.stack(
+                [np.arange(num_timesteps) for _ in range(total_batch_size)])
             for key in ["timesteps", "latents", "next_latents", "log_probs"]:
                 samples[key] = samples[key][
-                    mint.arange(total_batch_size)[:, None],
+                    np.arange(total_batch_size)[:, None],
                     perms,
                 ]
 
@@ -468,7 +613,7 @@ def train(args: argparse.Namespace):
 
             # train
             pipeline.transformer.set_train(True)
-            for i, sample in tqdm(
+            for i, sample in tqdm_(
                     enumerate(samples_batched),
                     desc=f"Epoch {epoch}.{inner_epoch}: training",
                     position=0):
@@ -476,32 +621,32 @@ def train(args: argparse.Namespace):
                     # concat negative prompts to sample prompts to avoid two forward passes
                     embeds = mint.cat([
                         train_neg_prompt_embeds[:len(sample["prompt_embeds"])],
-                        sample["prompt_embeds"]
+                        ms.tensor(sample["prompt_embeds"])
                     ])
                     pooled_embeds = mint.cat([
                         train_neg_pooled_prompt_embeds[:len(
                             sample["pooled_prompt_embeds"])],
-                        sample["pooled_prompt_embeds"]
+                        ms.tensor(sample["pooled_prompt_embeds"])
                     ])
                 else:
-                    embeds = sample["prompt_embeds"]
-                    pooled_embeds = sample["pooled_prompt_embeds"]
+                    embeds = ms.tensor(sample["prompt_embeds"])
+                    pooled_embeds = ms.tensor(sample["pooled_prompt_embeds"])
 
                 train_timesteps = [
                     step_index for step_index in range(num_train_timesteps)
                 ]
                 avg_loss = list()
-                for j in tqdm(
+                for j in tqdm_(
                         train_timesteps,
                         desc="Timestep",
                         position=1,
                         leave=False,
                 ):
-                    latents = sample["latents"][:, j]
-                    next_latents = sample["next_latents"][:, j]
-                    timesteps = sample["timesteps"][:, j]
-                    advantages = sample["advantages"][:, j]
-                    sample_log_probs = sample["log_probs"][:, j]
+                    latents = ms.tensor(sample["latents"][:, j])
+                    next_latents = ms.tensor(sample["next_latents"][:, j])
+                    timesteps = ms.tensor(sample["timesteps"][:, j])
+                    advantages = ms.tensor(sample["advantages"][:, j])
+                    sample_log_probs = ms.tensor(sample["log_probs"][:, j])
 
                     step_index = [
                         pipeline.scheduler.index_for_timestep(t)
@@ -533,35 +678,47 @@ def main():
     parser = argparse.ArgumentParser(usage="train sd3 with GRPO")
     args = parser.parse_args()
 
-    # TODO: hard coded, remove later
+    # TODO: hard coded, refactor later
+    # we follow config general_ocr_sd3 here
     args.num_steps = 10
     args.guidance_scale = 4.5
-    args.resolution = 768
+    args.resolution = 512
     args.timestep_fraction = 0.99
     args.kl_reward = 0
     args.model = os.environ.get("SD3_PATH", DEFAULT_MODEL)
-    args.mixed_precision = "fp16"
+    args.mixed_precision = "bf16"  # original repo uses fp16
     args.learning_rate = 3e-4
     args.adam_beta1 = 0.9
     args.adam_beta2 = 0.999
     args.adam_weight_decay = 1e-4
     args.adam_epsilon = 1e-8
-    args.reward_fn = {"jpeg_compressibility": 1}
+    args.reward_fn = {
+        "jpeg_compressibility": 1
+    }  # we should use {"ocr": 1}, but not implemented yet :(
     args.dataset = "dataset/ocr"
-    args.num_epochs = 100
+    args.num_epochs = 100000
     args.num_inner_epochs = 1
-    args.train_batch_size = 8
-    args.test_batch_size = 4
-    args.num_batches_per_epoch = 4
-    args.num_image_per_prompt = 1
-    args.gradient_accumulation_steps = 1
-    args.eval_freq = 60
-    args.save_freq = 20
+    args.train_batch_size = 3  # original 12, oom
+    args.test_batch_size = 3  # original 16
+    args.num_batches_per_epoch = 12
+    args.num_image_per_prompt = 3  # original 6, reduced according to train_batch_size
+    args.gradient_accumulation_steps = 1  # not implemented yet
+    args.eval_freq = 10  # original 60
+    args.eval_num_steps = 40
+    args.save_freq = 60
     args.cfg = True
-    args.beta = 0.0
+    args.beta = 0.001
     args.adv_clip_max = 5
     args.clip_range = 1e-4
-    args.debug = True
+    args.run_name = ""
+    args.resume_from = ""
+    args.seed = 42
+    args.use_lora = True
+    args.lora_path = None
+    args.per_prompt_stat_tracking = True
+    args.global_std = True
+    args.visual_num = 9
+    args.debug = False  # True to test with one layer network.
 
     train(args)
 
