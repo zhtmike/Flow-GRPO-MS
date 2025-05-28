@@ -191,7 +191,7 @@ def evaluate(pipeline_with_logprob_, args, test_iter, pipeline, text_encoders,
             height=args.resolution,
             width=args.resolution,
             determistic=True,
-        )
+            generator=np.random.default_rng(args.seed))
         for j, (prompt, image) in enumerate(zip(prompts, images)):
             num = i * len(images) + j
             if num >= args.visual_num:
@@ -701,13 +701,13 @@ def main():
     args.train_batch_size = 3  # original 12, oom
     args.test_batch_size = 3  # original 16
     args.num_batches_per_epoch = 12
-    args.num_image_per_prompt = 3  # original 6, reduced according to train_batch_size
+    args.num_image_per_prompt = 1  # original 6
     args.gradient_accumulation_steps = 1  # not implemented yet
-    args.eval_freq = 10  # original 60
+    args.eval_freq = 1  # original 60
     args.eval_num_steps = 40
     args.save_freq = 60
     args.cfg = True
-    args.beta = 0.001
+    args.beta = 0  # original 0.001
     args.adv_clip_max = 5
     args.clip_range = 1e-4
     args.run_name = ""
@@ -717,7 +717,7 @@ def main():
     args.lora_path = None
     args.per_prompt_stat_tracking = True
     args.global_std = True
-    args.visual_num = 9
+    args.visual_num = 6
     args.debug = False  # True to test with one layer network.
 
     train(args)

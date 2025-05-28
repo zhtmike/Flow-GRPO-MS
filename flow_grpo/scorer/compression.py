@@ -10,6 +10,9 @@ from .scorer import Scorer
 
 class JpegCompressibilityScorer(Scorer):
 
+    def __init__(self, max_size: int = 256) -> None:
+        self.max_size = max_size
+
     def __call__(self,
                  images: Union[List[Image.Image], np.ndarray, ms.Tensor],
                  prompts: Optional[List[str]] = None) -> List[float]:
@@ -18,8 +21,10 @@ class JpegCompressibilityScorer(Scorer):
         buffers = [io.BytesIO() for _ in images]
         for image, buffer in zip(images, buffers):
             image.convert("RGB").save(buffer, format="JPEG", quality=95)
-        sizes = [buffer.tell() / 1000 for buffer in buffers]
-        rewards = [-x / 500 for x in sizes]
+        # each compressed image file size (kb)
+        sizes = [buffer.tell() / 1024 for buffer in buffers]
+        # 256 kb: score 0; 0 kb: score 1
+        rewards = [max(0, 1 - x / self.max_size) for x in sizes]
         return rewards
 
 
