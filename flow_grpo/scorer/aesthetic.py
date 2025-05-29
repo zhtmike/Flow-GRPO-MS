@@ -71,16 +71,14 @@ class MLP(nn.Cell):
 
     def __init__(self, dtype: ms.Type = ms.float32):
         super().__init__()
-        self.layers = nn.SequentialCell(
-            mint.nn.Linear(768, 1024, dtype=dtype),
-            mint.nn.Dropout(0.2),
-            mint.nn.Linear(1024, 128, dtype=dtype),
-            mint.nn.Dropout(0.2),
-            mint.nn.Linear(128, 64, dtype=dtype),
-            mint.nn.Dropout(0.1),
-            mint.nn.Linear(64, 16, dtype=dtype),
-            mint.nn.Linear(16, 1, dtype=dtype),
-        )
+        self.layers = nn.SequentialCell(mint.nn.Linear(768, 1024, dtype=dtype),
+                                        mint.nn.Dropout(0.2),
+                                        mint.nn.Linear(1024, 128, dtype=dtype),
+                                        mint.nn.Dropout(0.2),
+                                        mint.nn.Linear(128, 64, dtype=dtype),
+                                        mint.nn.Dropout(0.1),
+                                        mint.nn.Linear(64, 16, dtype=dtype),
+                                        mint.nn.Linear(16, 1, dtype=dtype))
 
     def construct(self, embed):
         return self.layers(embed)

@@ -10,6 +10,7 @@ from .scorer import Scorer
 SCORERS = {
     "aesthetic": ("aesthetic", "AestheticScorer"),
     "jpeg_compressibility": ("compression", "JpegCompressibilityScorer"),
+    "pickscore": ("pickscore", "PickScoreScorer"),
     "qwenvl": ("qwenvl", "QwenVLScorer"),
 }
 
