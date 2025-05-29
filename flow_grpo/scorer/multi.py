@@ -8,8 +8,9 @@ from PIL import Image
 from .scorer import Scorer
 
 SCORERS = {
+    "aesthetic": ("aesthetic", "AestheticScorer"),
+    "jpeg_compressibility": ("compression", "JpegCompressibilityScorer"),
     "qwenvl": ("qwenvl", "QwenVLScorer"),
-    "jpeg_compressibility": ("compression", "JpegCompressibilityScorer")
 }
 
 

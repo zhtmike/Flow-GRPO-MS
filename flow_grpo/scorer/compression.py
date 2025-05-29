@@ -18,6 +18,7 @@ class JpegCompressibilityScorer(Scorer):
                  prompts: Optional[List[str]] = None) -> List[float]:
         if isinstance(images, (np.ndarray, ms.Tensor)):
             images = self.array_to_images(images)
+
         buffers = [io.BytesIO() for _ in images]
         for image, buffer in zip(images, buffers):
             image.convert("RGB").save(buffer, format="JPEG", quality=95)

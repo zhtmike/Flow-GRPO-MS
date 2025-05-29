@@ -50,6 +50,7 @@ class QwenVLScorer(Scorer):
                  prompts: Optional[List[str]] = None) -> List[float]:
         if isinstance(images, np.ndarray):
             images = self.array_to_images(images)
+
         images_base64 = [self.pil_image_to_base64(image) for image in images]
         messages = []
         for base64_qwen in images_base64:
