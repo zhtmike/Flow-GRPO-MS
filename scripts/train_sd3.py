@@ -5,6 +5,7 @@ import os
 import time
 from concurrent import futures
 from functools import partial
+from typing import Optional
 
 import mindspore as ms
 import mindspore.mint as mint
@@ -117,9 +118,17 @@ class NetWithLoss(nn.Cell):
 
         return prev_sample, log_prob, prev_sample_mean, std_dev_t
 
-    def construct(self, latents, next_latents, timesteps, embeds,
-                  pooled_embeds, advantages, sample_log_probs, sigma,
-                  sigma_prev) -> ms.Tensor:
+    def construct(self,
+                  latents: ms.Tensor,
+                  next_latents: ms.Tensor,
+                  timesteps: ms.Tensor,
+                  embeds: ms.Tensor,
+                  pooled_embeds: ms.Tensor,
+                  advantages: ms.Tensor,
+                  sample_log_probs: ms.Tensor,
+                  sigma: ms.Tensor,
+                  sigma_prev: ms.Tensor,
+                  loss_scaler: Optional[ms.Tensor] = None) -> ms.Tensor:
         _, log_prob, prev_sample_mean, std_dev_t = self.compute_log_prob(
             latents, next_latents, timesteps, embeds, pooled_embeds, sigma,
             sigma_prev)
@@ -151,6 +160,9 @@ class NetWithLoss(nn.Cell):
             loss = policy_loss + self.args.beta * kl_loss
         else:
             loss = policy_loss
+
+        if loss_scaler is not None:
+            loss = loss * loss_scaler
 
         return loss
 
@@ -194,14 +206,10 @@ def evaluate(pipeline_with_logprob_, args, test_iter, pipeline, text_encoders,
             generator=np.random.default_rng(args.seed))
         for j, (prompt, image) in enumerate(zip(prompts, images)):
             num = i * len(images) + j
-            if num >= args.visual_num:
-                break
             fname = f"{num}.jpg"
             total_prompts.append((fname, prompt))
             image.save(os.path.join(outdir, fname))
-        else:
-            continue
-        break
+
     with open(os.path.join(outdir, "prompt.txt"), "w") as f:
         for fname, prompt in total_prompts:
             f.write(f"{fname},{prompt}\n")
@@ -613,6 +621,9 @@ def train(args: argparse.Namespace):
 
             # train
             pipeline.transformer.set_train(True)
+            grad_accumulated = None
+            train_timesteps = list(range(num_train_timesteps))
+            map_ = ops.Map()
             for i, sample in tqdm_(
                     enumerate(samples_batched),
                     desc=f"Epoch {epoch}.{inner_epoch}: training",
@@ -632,9 +643,6 @@ def train(args: argparse.Namespace):
                     embeds = ms.tensor(sample["prompt_embeds"])
                     pooled_embeds = ms.tensor(sample["pooled_prompt_embeds"])
 
-                train_timesteps = [
-                    step_index for step_index in range(num_train_timesteps)
-                ]
                 avg_loss = list()
                 for j in tqdm_(
                         train_timesteps,
@@ -658,12 +666,30 @@ def train(args: argparse.Namespace):
                     sigma_prev = pipeline.scheduler.sigmas[
                         prev_step_index].view(-1, 1, 1, 1)
 
+                    if args.gradient_accumulation_steps > 1:
+                        loss_scaler = ms.Tensor(
+                            1 / args.gradient_accumulation_steps)
+                    else:
+                        loss_scaler = None
+
                     loss, grad = loss_and_grad_fn(latents, next_latents,
                                                   timesteps, embeds,
                                                   pooled_embeds, advantages,
                                                   sample_log_probs, sigma,
-                                                  sigma_prev)
-                    optimizer(grad)
+                                                  sigma_prev, loss_scaler)
+                    if (i * num_train_timesteps +
+                            j) % args.gradient_accumulation_steps == 0:
+                        grad_accumulated = grad
+                        logger.debug("Accumuated Gradient is reinitialized.")
+                    else:
+                        map_(lambda x, y: x.add_(y), grad_accumulated, grad)
+                        logger.debug("Accumuated Gradient is updated.")
+
+                    if (i * num_train_timesteps + j +
+                            1) % args.gradient_accumulation_steps == 0:
+                        optimizer(grad_accumulated)
+                        logger.debug("Parameters are updated.")
+
                     avg_loss.append(loss.item())
                     global_step += 1
 
@@ -683,7 +709,7 @@ def main():
     args.num_steps = 10
     args.guidance_scale = 4.5
     args.resolution = 512
-    args.timestep_fraction = 0.99
+    args.timestep_fraction = 1.0  # original 0.99
     args.kl_reward = 0
     args.model = os.environ.get("SD3_PATH", DEFAULT_MODEL)
     args.mixed_precision = "bf16"  # original repo uses fp16
@@ -701,8 +727,8 @@ def main():
     args.train_batch_size = 3  # original 12, oom
     args.test_batch_size = 3  # original 16
     args.num_batches_per_epoch = 12
-    args.num_image_per_prompt = 1  # original 6
-    args.gradient_accumulation_steps = 1  # not implemented yet
+    args.num_image_per_prompt = 3  # original 6
+    args.gradient_accumulation_steps = args.num_batches_per_epoch // 2
     args.eval_freq = 1  # original 60
     args.eval_num_steps = 40
     args.save_freq = 60
