@@ -624,6 +624,12 @@ def train(args: argparse.Namespace):
             grad_accumulated = None
             train_timesteps = list(range(num_train_timesteps))
             map_ = ops.Map()
+
+            if args.gradient_accumulation_steps > 1:
+                loss_scaler = ms.Tensor(1 / args.gradient_accumulation_steps)
+            else:
+                loss_scaler = None
+
             for i, sample in tqdm_(
                     enumerate(samples_batched),
                     desc=f"Epoch {epoch}.{inner_epoch}: training",
@@ -666,12 +672,6 @@ def train(args: argparse.Namespace):
                     sigma_prev = pipeline.scheduler.sigmas[
                         prev_step_index].view(-1, 1, 1, 1)
 
-                    if args.gradient_accumulation_steps > 1:
-                        loss_scaler = ms.Tensor(
-                            1 / args.gradient_accumulation_steps)
-                    else:
-                        loss_scaler = None
-
                     loss, grad = loss_and_grad_fn(latents, next_latents,
                                                   timesteps, embeds,
                                                   pooled_embeds, advantages,
@@ -687,6 +687,9 @@ def train(args: argparse.Namespace):
 
                     if (i * num_train_timesteps + j +
                             1) % args.gradient_accumulation_steps == 0:
+                        if args.max_grad_norm is not None:
+                            grad_accumulated = ops.clip_by_global_norm(
+                                grad_accumulated, clip_norm=args.max_grad_norm)
                         optimizer(grad_accumulated)
                         logger.debug("Parameters are updated.")
 
@@ -709,31 +712,32 @@ def main():
     args.num_steps = 10
     args.guidance_scale = 4.5
     args.resolution = 512
-    args.timestep_fraction = 1.0  # original 0.99
+    args.timestep_fraction = 1.0  # original 0.99, why?
     args.kl_reward = 0
     args.model = os.environ.get("SD3_PATH", DEFAULT_MODEL)
-    args.mixed_precision = "bf16"  # original repo uses fp16
+    args.mixed_precision = "bf16"  # original fp16, but need to add loss scaler
     args.learning_rate = 3e-4
     args.adam_beta1 = 0.9
     args.adam_beta2 = 0.999
     args.adam_weight_decay = 1e-4
     args.adam_epsilon = 1e-8
+    args.max_grad_norm = 1.0
     args.reward_fn = {
         "jpeg_compressibility": 1
     }  # we should use {"ocr": 1}, but not implemented yet :(
     args.dataset = "dataset/ocr"
-    args.num_epochs = 100000
+    args.num_epochs = 100  # original 100000
     args.num_inner_epochs = 1
     args.train_batch_size = 3  # original 12, oom
     args.test_batch_size = 3  # original 16
     args.num_batches_per_epoch = 12
-    args.num_image_per_prompt = 3  # original 6
+    args.num_image_per_prompt = 1  # original 6
     args.gradient_accumulation_steps = args.num_batches_per_epoch // 2
-    args.eval_freq = 1  # original 60
+    args.eval_freq = 3  # original 60
     args.eval_num_steps = 40
     args.save_freq = 60
     args.cfg = True
-    args.beta = 0  # original 0.001
+    args.beta = 0.001
     args.adv_clip_max = 5
     args.clip_range = 1e-4
     args.run_name = ""
