@@ -5,20 +5,18 @@ import os
 import time
 from concurrent import futures
 from functools import partial
-from typing import Optional
+from typing import Any, List, Optional
 
 import mindspore as ms
 import mindspore.mint as mint
 import mindspore.mint.distributed as dist
 import mindspore.nn as nn
-import mindspore.ops as ops
 import numpy as np
 from mindone.diffusers import (AutoencoderKL, FlowMatchEulerDiscreteScheduler,
                                SD3Transformer2DModel, StableDiffusion3Pipeline)
 from mindone.diffusers._peft import LoraConfig, PeftModel, get_peft_model
-from mindone.diffusers.training_utils import pynative_no_grad
 from mindone.transformers import CLIPTextModelWithProjection, T5EncoderModel
-from mindspore.dataset import GeneratorDataset
+from mindspore.dataset import DictIterator, GeneratorDataset
 from tqdm import tqdm
 from transformers import CLIPTextConfig, T5Config
 
@@ -28,6 +26,7 @@ from flow_grpo.diffusers_patch.sd3_pipeline_with_logprob import \
 from flow_grpo.diffusers_patch.sd3_sde_with_logprob import \
     sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_sd3 import encode_prompt
+from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.scorer import MultiScorer
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.util import (clip_by_global_norm, gather, map_, requires_grad_,
@@ -166,9 +165,15 @@ class NetWithLoss(nn.Cell):
         return loss
 
 
-def evaluate(pipeline_with_logprob_, args, test_iter, pipeline, text_encoders,
-             tokenizers, sample_neg_prompt_embeds,
-             sample_neg_pooled_prompt_embeds, outdir):
+def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
+             test_iter: DictIterator, pipeline: StableDiffusion3Pipeline,
+             text_encoders: List[nn.Cell], tokenizers: List[Any],
+             sample_neg_prompt_embeds: ms.Tensor,
+             sample_neg_pooled_prompt_embeds: ms.Tensor, ema: EMAModuleWrapper,
+             parameters: ms.ParameterTuple, outdir: str):
+    if args.ema:
+        ema.copy_ema_to(parameters, store_temp=True)
+
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
     total_prompts = list()
@@ -212,6 +217,9 @@ def evaluate(pipeline_with_logprob_, args, test_iter, pipeline, text_encoders,
     with open(os.path.join(outdir, "prompt.txt"), "w") as f:
         for fname, prompt in total_prompts:
             f.write(f"{fname},{prompt}\n")
+
+    if args.ema:
+        ema.copy_temp_to(parameters)
     return
 
 
@@ -319,7 +327,7 @@ def train(args: argparse.Namespace):
             pipeline.transformer = get_peft_model(pipeline.transformer,
                                                   transformer_lora_config)
 
-    trainable_parameters = list(
+    trainable_parameters = ms.ParameterTuple(
         filter(lambda p: p.requires_grad,
                pipeline.transformer.get_parameters()))
 
@@ -341,7 +349,11 @@ def train(args: argparse.Namespace):
     )
     logger.info(f"total trainable parameter: {trainable_params:,}")
 
-    # TODO: add EMA
+    if args.ema:
+        ema = EMAModuleWrapper(trainable_parameters,
+                               decay=0.9,
+                               update_step_interval=1)
+
     optimizer = mint.optim.AdamW(trainable_parameters,
                                  lr=args.learning_rate,
                                  betas=(args.adam_beta1, args.adam_beta2),
@@ -471,7 +483,8 @@ def train(args: argparse.Namespace):
                 outdir = os.path.join(output_dir, "visual", f"epoch_{epoch}")
                 evaluate(pipeline_with_logprob_, args, test_iter, pipeline,
                          text_encoders, tokenizers, sample_neg_prompt_embeds,
-                         sample_neg_pooled_prompt_embeds, outdir)
+                         sample_neg_pooled_prompt_embeds, ema,
+                         trainable_parameters, outdir)
             if i == 0 and epoch % args.save_freq == 0 and epoch > 0 and is_main_process:
                 save_checkpoint()
             dist.barrier()
@@ -565,7 +578,7 @@ def train(args: argparse.Namespace):
                           gathered_rewards['avg'].mean()) / (
                               gathered_rewards['avg'].std() + 1e-4)
 
-        # TODO: ungather advantages
+        # ungather advantages; we only need to keep the entries corresponding to the samples on this process
         advantages = advantages.astype(np.float32)
         samples["advantages"] = advantages.reshape(
             num_processes, -1, advantages.shape[-1])[process_index]
@@ -731,6 +744,9 @@ def train(args: argparse.Namespace):
                     "loss": np.mean(avg_loss).item()
                 })
 
+                if args.ema:
+                    ema(trainable_parameters, global_step)
+
 
 def main():
     parser = argparse.ArgumentParser(usage="train sd3 with GRPO")
@@ -777,6 +793,7 @@ def main():
     args.per_prompt_stat_tracking = True
     args.global_std = True
     args.visual_num = 6
+    args.ema = True
     args.debug = False  # True to test with one layer network.
 
     train(args)
