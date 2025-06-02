@@ -591,6 +591,8 @@ def train(args: argparse.Namespace):
             prompts = pipeline.tokenizer.batch_decode(prompt_ids,
                                                       skip_special_tokens=True)
             advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
+            logger.debug("total number of prompts", len(prompts))
+            logger.debug("total number of unique prompts", len(set(prompts)))
             stat_tracker.clear()
         else:
             advantages = (gathered_rewards['avg'] -
@@ -601,6 +603,10 @@ def train(args: argparse.Namespace):
         advantages = advantages.astype(np.float32)
         samples["advantages"] = advantages.reshape(
             num_processes, -1, advantages.shape[-1])[process_index]
+
+        logger.debug("advantages: %s",
+                     samples["advantages"].abs().mean().item())
+        logger.debug("kl: %s", samples["kl"].mean().item())
 
         del samples["rewards"]
         del samples["prompt_ids"]
