@@ -31,7 +31,7 @@ from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.scorer import MultiScorer
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.util import (clip_by_global_norm, gather, map_, requires_grad_,
-                            syn_gradients)
+                            save_checkpoint, syn_gradients)
 
 DEFAULT_MODEL = "stabilityai/stable-diffusion-3.5-medium"
 
@@ -240,11 +240,6 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
     if args.ema:
         ema.copy_temp_to(parameters)
     return
-
-
-def save_checkpoint(*args, **kwargs):
-    # TODO: to be implemented
-    ...
 
 
 def train(args: argparse.Namespace):
@@ -505,7 +500,8 @@ def train(args: argparse.Namespace):
                          sample_neg_pooled_prompt_embeds, ema,
                          trainable_parameters, outdir, executor, reward_fn)
             if i == 0 and epoch % args.save_freq == 0 and epoch > 0 and is_main_process:
-                save_checkpoint()
+                save_checkpoint(trainable_parameters,
+                                outdir=os.path.join(output_dir, "ckpt"))
             dist.barrier()
 
             images, latents, log_probs, kls = pipeline_with_logprob_(
@@ -605,7 +601,7 @@ def train(args: argparse.Namespace):
             num_processes, -1, advantages.shape[-1])[process_index]
 
         logger.debug("advantages: %s",
-                     samples["advantages"].abs().mean().item())
+                     np.abs(samples["advantages"]).mean().item())
         logger.debug("kl: %s", samples["kl"].mean().item())
 
         del samples["rewards"]
@@ -805,7 +801,7 @@ def main():
     args.gradient_accumulation_steps = args.num_batches_per_epoch // 2
     args.eval_freq = 3  # original 60
     args.eval_num_steps = 40
-    args.save_freq = 60
+    args.save_freq = 3  # original 60
     args.cfg = True
     args.beta = 0.001
     args.adv_clip_max = 5

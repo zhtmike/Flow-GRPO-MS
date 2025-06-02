@@ -1,3 +1,4 @@
+import os
 from functools import partial
 from typing import Tuple
 
@@ -41,6 +42,15 @@ def syn_gradients(gradients: Tuple[ms.Tensor]) -> ms.Tensor:
     map_(dist.all_reduce, gradients)
     map_(lambda x: x / size, gradients)
     return gradients
+
+
+def save_checkpoint(trainable_parameters: ms.ParameterTuple,
+                    outdir: str) -> None:
+    if not os.path.isdir(outdir):
+        os.makedirs(outdir)
+
+    ms.save_checkpoint(list(trainable_parameters),
+                       os.path.join(outdir, "model.ckpt"))
 
 
 def clip_by_global_norm(grads: Tuple[ms.Tensor],
