@@ -245,8 +245,7 @@ def train(args: argparse.Namespace):
 
     logger.info(f"\n{args}")
 
-    # set seed (device_specific is very important to get different prompts on different devices)
-    # TODO: set device_specifig seed, will it affect lora model initialization?
+    # set the same seed for model inialization
     ms.set_seed(args.seed)
 
     # load scheduler, tokenizer and models.
@@ -354,6 +353,9 @@ def train(args: argparse.Namespace):
 
     # prepare prompt and reward fn
     reward_fn = MultiScorer(args.reward_fn)
+
+    # set seed (device_specific is very important to get different prompts on different devices)
+    ms.set_seed(args.seed + process_index)
 
     train_dataset = TextPromptDataset(args.dataset, 'train')
     test_dataset = TextPromptDataset(args.dataset,
