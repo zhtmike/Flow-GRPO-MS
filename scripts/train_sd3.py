@@ -130,16 +130,14 @@ class NetWithLoss(nn.Cell):
                   sample_log_probs: ms.Tensor,
                   sigma: ms.Tensor,
                   sigma_prev: ms.Tensor,
+                  prev_sample_mean_ref: Optional[ms.Tensor] = None,
                   loss_scaler: Optional[ms.Tensor] = None) -> ms.Tensor:
+        if self.args.beta > 0:
+            assert prev_sample_mean_ref is not None
+
         _, log_prob, prev_sample_mean, std_dev_t = self.compute_log_prob(
             latents, next_latents, timesteps, embeds, pooled_embeds, sigma,
             sigma_prev)
-        if self.args.beta > 0:
-            with pynative_no_grad():
-                with self.transformer.disable_adapter():
-                    _, _, prev_sample_mean_ref, _ = self.compute_log_prob(
-                        latents, next_latents, timesteps, embeds,
-                        pooled_embeds, sigma, sigma_prev)
         # grpo logic
         advantages = mint.clamp(
             advantages,
@@ -155,9 +153,8 @@ class NetWithLoss(nn.Cell):
         )
         policy_loss = mint.mean(mint.maximum(unclipped_loss, clipped_loss))
         if self.args.beta > 0:
-            kl_loss = (
-                (prev_sample_mean - ops.stop_gradient(prev_sample_mean_ref))**
-                2).mean(dim=(1, 2, 3), keepdim=True) / (2 * std_dev_t**2)
+            kl_loss = ((prev_sample_mean - prev_sample_mean_ref)**2).mean(
+                dim=(1, 2, 3), keepdim=True) / (2 * std_dev_t**2)
             kl_loss = mint.mean(kl_loss)
             loss = policy_loss + self.args.beta * kl_loss
         else:
@@ -691,11 +688,24 @@ def train(args: argparse.Namespace):
                     sigma_prev = pipeline.scheduler.sigmas[
                         prev_step_index].view(-1, 1, 1, 1)
 
-                    loss, grad = loss_and_grad_fn(latents, next_latents,
-                                                  timesteps, embeds,
-                                                  pooled_embeds, advantages,
-                                                  sample_log_probs, sigma,
-                                                  sigma_prev, loss_scaler)
+                    with pipeline.transformer.disable_adapter():
+                        _, _, prev_sample_mean_ref, _ = net_with_loss.compute_log_prob(
+                            latents, next_latents, timesteps, embeds,
+                            pooled_embeds, sigma, sigma_prev)
+
+                    loss, grad = loss_and_grad_fn(
+                        latents,
+                        next_latents,
+                        timesteps,
+                        embeds,
+                        pooled_embeds,
+                        advantages,
+                        sample_log_probs,
+                        sigma,
+                        sigma_prev,
+                        prev_sample_mean_ref=prev_sample_mean_ref,
+                        loss_scaler=loss_scaler)
+
                     if (i * num_train_timesteps +
                             j) % args.gradient_accumulation_steps == 0:
                         grad_accumulated = grad
