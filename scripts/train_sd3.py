@@ -9,6 +9,7 @@ from typing import Optional
 
 import mindspore as ms
 import mindspore.mint as mint
+import mindspore.mint.distributed as dist
 import mindspore.nn as nn
 import mindspore.ops as ops
 import numpy as np
@@ -29,7 +30,8 @@ from flow_grpo.diffusers_patch.sd3_sde_with_logprob import \
 from flow_grpo.diffusers_patch.train_dreambooth_lora_sd3 import encode_prompt
 from flow_grpo.scorer import MultiScorer
 from flow_grpo.stat_tracking import PerPromptStatTracker
-from flow_grpo.util import requires_grad_
+from flow_grpo.util import (clip_by_global_norm, gather, map_, requires_grad_,
+                            syn_gradients)
 
 DEFAULT_MODEL = "stabilityai/stable-diffusion-3.5-medium"
 
@@ -222,9 +224,10 @@ def save_checkpoint(*args, **kwargs):
 
 
 def train(args: argparse.Namespace):
-    # TODO: hardcoded for mimicing distributed training
-    num_processes = 1
-    process_index = 0
+    dist.init_process_group()
+    num_processes = dist.get_world_size()
+    process_index = dist.get_rank()
+    is_main_process = process_index == 0
 
     unique_id = datetime.datetime.now().strftime("%Y.%m.%d_%H.%M.%S")
     if not args.run_name:
@@ -274,7 +277,7 @@ def train(args: argparse.Namespace):
     # make the progress bar nicer
     pipeline.set_progress_bar_config(
         position=1,
-        disable=False,
+        disable=not is_main_process,
         leave=False,
         desc="Timestep",
         dynamic_ncols=True,
@@ -448,6 +451,7 @@ def train(args: argparse.Namespace):
         samples = []
         for i in tqdm_(range(args.num_batches_per_epoch),
                        desc=f"Epoch {epoch}: sampling",
+                       disable=not is_main_process,
                        position=0):
             prompts = next(train_iter)["prompt"].tolist()
 
@@ -464,13 +468,14 @@ def train(args: argparse.Namespace):
                 truncation=True,
                 return_tensors="np",
             ).input_ids
-            if i == 0 and epoch % args.eval_freq == 0:
+            if i == 0 and epoch % args.eval_freq == 0 and is_main_process:
                 outdir = os.path.join(output_dir, "visual", f"epoch_{epoch}")
                 evaluate(pipeline_with_logprob_, args, test_iter, pipeline,
                          text_encoders, tokenizers, sample_neg_prompt_embeds,
                          sample_neg_pooled_prompt_embeds, outdir)
-            if i == 0 and epoch % args.save_freq == 0 and epoch > 0:
+            if i == 0 and epoch % args.save_freq == 0 and epoch > 0 and is_main_process:
                 save_checkpoint()
+            dist.barrier()
 
             images, latents, log_probs, kls = pipeline_with_logprob_(
                 pipeline,
@@ -517,7 +522,10 @@ def train(args: argparse.Namespace):
             })
 
         # wait for all rewards to be computed
-        for sample in tqdm_(samples, desc="Waiting for rewards", position=0):
+        for sample in tqdm_(samples,
+                            desc="Waiting for rewards",
+                            disable=not is_main_process,
+                            position=0):
             rewards = sample["rewards"].result()
             sample["rewards"] = rewards
 
@@ -535,13 +543,20 @@ def train(args: argparse.Namespace):
         samples["rewards"]["ori_avg"] = samples["rewards"]["avg"]
         samples["rewards"]["avg"] = samples["rewards"]["avg"][
             ..., None] - args.kl_reward * samples["kl"]
-        # TODO: gather rewards across processes
-        gathered_rewards = samples["rewards"]
+        # gather rewards across processes
+        gathered_rewards = {
+            key: gather(ms.tensor(value))
+            for key, value in samples["rewards"].items()
+        }
+        gathered_rewards = {
+            key: value.numpy()
+            for key, value in gathered_rewards.items()
+        }
 
         # per-prompt mean/std tracking
         if args.per_prompt_stat_tracking:
             # gather the prompts across processes
-            prompt_ids = samples["prompt_ids"]
+            prompt_ids = gather(ms.tensor(samples["prompt_ids"])).numpy()
             prompts = pipeline.tokenizer.batch_decode(prompt_ids,
                                                       skip_special_tokens=True)
             advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
@@ -553,7 +568,8 @@ def train(args: argparse.Namespace):
 
         # TODO: ungather advantages
         advantages = advantages.astype(np.float32)
-        samples["advantages"] = advantages.reshape(-1, advantages.shape[-1])
+        samples["advantages"] = advantages.reshape(
+            num_processes, -1, advantages.shape[-1])[process_index]
 
         del samples["rewards"]
         del samples["prompt_ids"]
@@ -623,7 +639,6 @@ def train(args: argparse.Namespace):
             pipeline.transformer.set_train(True)
             grad_accumulated = None
             train_timesteps = list(range(num_train_timesteps))
-            map_ = ops.Map()
 
             if args.gradient_accumulation_steps > 1:
                 loss_scaler = ms.Tensor(1 / args.gradient_accumulation_steps)
@@ -633,7 +648,8 @@ def train(args: argparse.Namespace):
             for i, sample in tqdm_(
                     enumerate(samples_batched),
                     desc=f"Epoch {epoch}.{inner_epoch}: training",
-                    position=0):
+                    position=0,
+                    disable=not is_main_process):
                 if args.cfg:
                     # concat negative prompts to sample prompts to avoid two forward passes
                     embeds = mint.cat([
@@ -655,6 +671,7 @@ def train(args: argparse.Namespace):
                         desc="Timestep",
                         position=1,
                         leave=False,
+                        disable=not is_main_process,
                 ):
                     latents = ms.tensor(sample["latents"][:, j])
                     next_latents = ms.tensor(sample["next_latents"][:, j])
@@ -687,9 +704,9 @@ def train(args: argparse.Namespace):
 
                     if (i * num_train_timesteps + j +
                             1) % args.gradient_accumulation_steps == 0:
-                        if args.max_grad_norm is not None:
-                            grad_accumulated = ops.clip_by_global_norm(
-                                grad_accumulated, clip_norm=args.max_grad_norm)
+                        syn_gradients(grad_accumulated)
+                        clip_by_global_norm(grad_accumulated,
+                                            max_norm=args.max_grad_norm)
                         optimizer(grad_accumulated)
                         logger.debug("Parameters are updated.")
 
