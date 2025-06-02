@@ -3,6 +3,7 @@ import datetime
 import logging
 import os
 import time
+from collections import defaultdict
 from concurrent import futures
 from functools import partial
 from typing import Any, List, Optional
@@ -170,13 +171,16 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
              text_encoders: List[nn.Cell], tokenizers: List[Any],
              sample_neg_prompt_embeds: ms.Tensor,
              sample_neg_pooled_prompt_embeds: ms.Tensor, ema: EMAModuleWrapper,
-             parameters: ms.ParameterTuple, outdir: str):
+             parameters: ms.ParameterTuple, outdir: str,
+             executor: futures.ThreadPoolExecutor,
+             reward_fn: MultiScorer) -> None:
     if args.ema:
         ema.copy_ema_to(parameters, store_temp=True)
 
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
     total_prompts = list()
+    all_rewards = defaultdict(list)
     for i, test_batch in tqdm_(
             enumerate(test_iter),
             desc="Eval: ",
@@ -208,12 +212,27 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
             width=args.resolution,
             determistic=True,
             generator=np.random.default_rng(args.seed))
+
+        # save the image for visualization
         for j, (prompt, image) in enumerate(zip(prompts, images)):
             num = i * len(images) + j
             fname = f"{num}.jpg"
             total_prompts.append((fname, prompt))
             image.save(os.path.join(outdir, fname))
 
+        # calcuate the validation reward
+        rewards = executor.submit(reward_fn, images, prompts)
+        # yield to to make sure reward computation starts
+        time.sleep(0)
+        rewards = rewards.result()
+        for k, v in rewards.items():
+            all_rewards[k].extend(v)
+
+    avg_rewards = dict()
+    for k, v in all_rewards.items():
+        avg_rewards[k] = np.mean(v).item()
+
+    logger.info(f"Validation rewards: {avg_rewards}")
     with open(os.path.join(outdir, "prompt.txt"), "w") as f:
         for fname, prompt in total_prompts:
             f.write(f"{fname},{prompt}\n")
@@ -369,7 +388,7 @@ def train(args: argparse.Namespace):
     train_dataset = TextPromptDataset(args.dataset, 'train')
     test_dataset = TextPromptDataset(args.dataset,
                                      'test',
-                                     max_num=args.visual_num)
+                                     max_num=args.validation_num)
     train_sampler = DistributedKRepeatSampler(dataset=train_dataset,
                                               batch_size=args.train_batch_size,
                                               k=args.num_image_per_prompt,
@@ -484,7 +503,7 @@ def train(args: argparse.Namespace):
                 evaluate(pipeline_with_logprob_, args, test_iter, pipeline,
                          text_encoders, tokenizers, sample_neg_prompt_embeds,
                          sample_neg_pooled_prompt_embeds, ema,
-                         trainable_parameters, outdir)
+                         trainable_parameters, outdir, executor, reward_fn)
             if i == 0 and epoch % args.save_freq == 0 and epoch > 0 and is_main_process:
                 save_checkpoint()
             dist.barrier()
@@ -792,7 +811,7 @@ def main():
     args.lora_path = None
     args.per_prompt_stat_tracking = True
     args.global_std = True
-    args.visual_num = 6
+    args.validation_num = 12
     args.ema = True
     args.debug = False  # True to test with one layer network.
 
