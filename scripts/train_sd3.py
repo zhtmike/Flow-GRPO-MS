@@ -456,6 +456,7 @@ def train(args: argparse.Namespace):
         first_epoch = 0
     global_step = 0
 
+    train_iter = train_dataloader.create_dict_iterator(output_numpy=True)
     test_iter = test_dataloader.create_dict_iterator(output_numpy=True)
 
     pipeline_with_logprob_ = ms.amp.auto_mixed_precision(pipeline_with_logprob,
@@ -472,7 +473,6 @@ def train(args: argparse.Namespace):
                                          weights=optimizer.parameters)
 
     for epoch in range(first_epoch, args.num_epochs):
-        train_iter = train_dataloader.create_dict_iterator(output_numpy=True)
         #################### SAMPLING ####################
         pipeline.transformer.set_train(False)
         samples = []
