@@ -181,6 +181,7 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
         os.makedirs(outdir)
     total_prompts = list()
     all_rewards = defaultdict(list)
+    generator = np.random.default_rng(args.seed)
     for i, test_batch in tqdm_(enumerate(test_iter),
                                desc="Eval: ",
                                position=0,
@@ -210,7 +211,7 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
             height=args.resolution,
             width=args.resolution,
             determistic=True,
-            generator=np.random.default_rng(args.seed))
+            generator=generator)
 
         # save the image for visualization
         for j, (prompt, image) in enumerate(zip(prompts, images)):
