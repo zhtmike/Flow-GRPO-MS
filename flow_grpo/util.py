@@ -31,17 +31,17 @@ def gather(x: ms.Tensor):
     return output
 
 
-def syn_gradients(gradients: Tuple[ms.Tensor]) -> ms.Tensor:
+def syn_gradients(gradients: Tuple[ms.Tensor]) -> None:
     """
     Synchronize gradients across all devices.
     """
     size = dist.get_world_size()
     if size == 1:
-        return gradients
+        return
 
+    scale = ms.tensor(1 / size)
     map_(dist.all_reduce, gradients)
-    map_(lambda x: x / size, gradients)
-    return gradients
+    map_(lambda x: x.mul_(scale), gradients)
 
 
 def save_checkpoint(trainable_parameters: ms.ParameterTuple,
