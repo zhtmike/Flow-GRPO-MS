@@ -797,12 +797,12 @@ def main():
     args.num_inner_epochs = 1
     args.train_batch_size = 3  # original 12, oom
     args.test_batch_size = 3  # original 16
-    args.num_batches_per_epoch = 12
-    args.num_image_per_prompt = 1  # original 6
+    args.num_batches_per_epoch = 48  # original 12, we reduce the batch size by 4 times, increase the accumlation steps by 4 times to align the orignal setting.
+    args.num_image_per_prompt = 6
     args.gradient_accumulation_steps = args.num_batches_per_epoch // 2
-    args.eval_freq = 3  # original 60
+    args.eval_freq = 2  # original 60
     args.eval_num_steps = 40
-    args.save_freq = 3  # original 60
+    args.save_freq = 2  # original 60
     args.cfg = True
     args.beta = 0.001
     args.adv_clip_max = 5

@@ -13,5 +13,5 @@ export TOKENIZERS_PARALLELISM=False
 # python -m flow_grpo.scorer.aesthetic
 # python -m flow_grpo.scorer.pickscore
 
-# training with one card
-msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts/train_sd3.py
+# training with two cards at least for 6 images for single prompt
+msrun --worker_num 2 --local_worker_num 2 --master_port 9527 --join True scripts/train_sd3.py
