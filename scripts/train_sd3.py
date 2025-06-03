@@ -172,8 +172,8 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
              sample_neg_prompt_embeds: ms.Tensor,
              sample_neg_pooled_prompt_embeds: ms.Tensor, ema: EMAModuleWrapper,
              parameters: ms.ParameterTuple, outdir: str,
-             executor: futures.ThreadPoolExecutor,
-             reward_fn: MultiScorer) -> None:
+             executor: futures.ThreadPoolExecutor, reward_fn: MultiScorer,
+             total: int) -> None:
     if args.ema:
         ema.copy_ema_to(parameters, store_temp=True)
 
@@ -181,11 +181,10 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
         os.makedirs(outdir)
     total_prompts = list()
     all_rewards = defaultdict(list)
-    for i, test_batch in tqdm_(
-            enumerate(test_iter),
-            desc="Eval: ",
-            position=0,
-    ):
+    for i, test_batch in tqdm_(enumerate(test_iter),
+                               desc="Eval: ",
+                               position=0,
+                               total=total):
         prompts = test_batch["prompt"].tolist()
         prompt_embeds, pooled_prompt_embeds = encode_prompt(
             text_encoders,
@@ -456,7 +455,7 @@ def train(args: argparse.Namespace):
     else:
         first_epoch = 0
     global_step = 0
-    train_iter = train_dataloader.create_dict_iterator(output_numpy=True)
+
     test_iter = test_dataloader.create_dict_iterator(output_numpy=True)
 
     pipeline_with_logprob_ = ms.amp.auto_mixed_precision(pipeline_with_logprob,
@@ -473,6 +472,7 @@ def train(args: argparse.Namespace):
                                          weights=optimizer.parameters)
 
     for epoch in range(first_epoch, args.num_epochs):
+        train_iter = train_dataloader.create_dict_iterator(output_numpy=True)
         #################### SAMPLING ####################
         pipeline.transformer.set_train(False)
         samples = []
@@ -500,7 +500,8 @@ def train(args: argparse.Namespace):
                 evaluate(pipeline_with_logprob_, args, test_iter, pipeline,
                          text_encoders, tokenizers, sample_neg_prompt_embeds,
                          sample_neg_pooled_prompt_embeds, ema,
-                         trainable_parameters, outdir, executor, reward_fn)
+                         trainable_parameters, outdir, executor, reward_fn,
+                         len(test_dataloader))
             if i == 0 and epoch % args.save_freq == 0 and epoch > 0 and is_main_process:
                 save_checkpoint(trainable_parameters,
                                 outdir=os.path.join(output_dir, "ckpt"))
@@ -682,7 +683,7 @@ def train(args: argparse.Namespace):
                 loss_scaler = None
 
             for i, sample in tqdm_(
-                    enumerate(samples_batched),
+                    list(enumerate(samples_batched)),
                     desc=f"Epoch {epoch}.{inner_epoch}: training",
                     position=0,
                     disable=not is_main_process):
