@@ -367,6 +367,8 @@ def train(args: argparse.Namespace):
         ema = EMAModuleWrapper(trainable_parameters,
                                decay=0.9,
                                update_step_interval=1)
+    else:
+        ema = None
 
     optimizer = mint.optim.AdamW(trainable_parameters,
                                  lr=args.learning_rate,
