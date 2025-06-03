@@ -632,7 +632,7 @@ def train(args: argparse.Namespace):
         total_batch_size, num_timesteps = samples["timesteps"].shape
         assert num_timesteps == args.num_steps
 
-        logger.info({
+        logger.debug({
             "global_step": global_step,
             "epoch": epoch,
             **{
@@ -763,7 +763,7 @@ def train(args: argparse.Namespace):
                     avg_loss.append(loss.item())
                     global_step += 1
 
-                logger.info({
+                logger.debug({
                     "global_step": global_step,
                     "epoch": epoch,
                     "loss": np.mean(avg_loss).item()
