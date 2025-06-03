@@ -587,8 +587,9 @@ def train(args: argparse.Namespace):
             prompts = pipeline.tokenizer.batch_decode(prompt_ids,
                                                       skip_special_tokens=True)
             advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
-            logger.debug("total number of prompts", len(prompts))
-            logger.debug("total number of unique prompts", len(set(prompts)))
+            logger.debug("total number of prompts: %s", len(prompts))
+            logger.debug("total number of unique prompts: %s",
+                         len(set(prompts)))
             stat_tracker.clear()
         else:
             advantages = (gathered_rewards['avg'] -
