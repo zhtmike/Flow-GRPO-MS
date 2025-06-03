@@ -460,15 +460,7 @@ def train(args: argparse.Namespace):
     train_iter = train_dataloader.create_dict_iterator(output_numpy=True)
     test_iter = test_dataloader.create_dict_iterator(output_numpy=True)
 
-    pipeline_with_logprob_ = ms.amp.auto_mixed_precision(pipeline_with_logprob,
-                                                         amp_level="auto",
-                                                         dtype=inference_dtype)
-
     net_with_loss = NetWithLoss(pipeline.transformer, pipeline.scheduler, args)
-    net_with_loss = ms.amp.auto_mixed_precision(net_with_loss,
-                                                amp_level="auto",
-                                                dtype=inference_dtype)
-
     loss_and_grad_fn = ms.value_and_grad(net_with_loss,
                                          grad_position=None,
                                          weights=optimizer.parameters)
@@ -498,7 +490,7 @@ def train(args: argparse.Namespace):
             ).input_ids
             if i == 0 and epoch % args.eval_freq == 0 and is_main_process:
                 outdir = os.path.join(output_dir, "visual", f"epoch_{epoch}")
-                evaluate(pipeline_with_logprob_, args, test_iter, pipeline,
+                evaluate(pipeline_with_logprob, args, test_iter, pipeline,
                          text_encoders, tokenizers, sample_neg_prompt_embeds,
                          sample_neg_pooled_prompt_embeds, ema,
                          trainable_parameters, outdir, executor, reward_fn,
@@ -508,7 +500,7 @@ def train(args: argparse.Namespace):
                                 outdir=os.path.join(output_dir, "ckpt"))
             dist.barrier()
 
-            images, latents, log_probs, kls = pipeline_with_logprob_(
+            images, latents, log_probs, kls = pipeline_with_logprob(
                 pipeline,
                 prompt_embeds=prompt_embeds,
                 pooled_prompt_embeds=pooled_prompt_embeds,
