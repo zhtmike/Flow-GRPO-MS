@@ -10,9 +10,8 @@ from .scorer import Scorer
 
 class JpegCompressibilityScorer(Scorer):
 
-    def __init__(self, max_size: int = 256, inverse: bool = False) -> None:
+    def __init__(self, max_size: int = 256) -> None:
         self.max_size = max_size
-        self.inverse = inverse
 
     def __call__(self,
                  images: Union[List[Image.Image], np.ndarray, ms.Tensor],
@@ -27,8 +26,19 @@ class JpegCompressibilityScorer(Scorer):
         sizes = [buffer.tell() / 1024 for buffer in buffers]
         # 256 kb: score 0; 0 kb: score 1
         rewards = [max(0, 1 - x / self.max_size) for x in sizes]
-        if self.inverse:
-            rewards = [1 - r for r in rewards]
+        return rewards
+
+
+class JpegImcompressibilityScorer(JpegCompressibilityScorer):
+
+    def __init__(self, max_size: int = 256) -> None:
+        super().__init__(max_size=max_size)
+
+    def __call__(self,
+                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
+                 prompts: Optional[List[str]] = None) -> List[float]:
+        rewards = super().__call__(images, prompts)
+        rewards = [1 - r for r in rewards]
         return rewards
 
 
