@@ -310,10 +310,11 @@ def pipeline_with_logprob(
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timestep = t.expand((latent_model_input.shape[0], ))
             noise_pred = self.transformer(
-                hidden_states=latent_model_input,
+                hidden_states=latent_model_input.to(self.transformer.dtype),
                 timestep=timestep,
-                encoder_hidden_states=prompt_embeds,
-                pooled_projections=pooled_prompt_embeds,
+                encoder_hidden_states=prompt_embeds.to(self.transformer.dtype),
+                pooled_projections=pooled_prompt_embeds.to(
+                    self.transformer.dtype),
                 joint_attention_kwargs=self.joint_attention_kwargs,
                 return_dict=False,
             )[0]
@@ -331,10 +332,13 @@ def pipeline_with_logprob(
                     timestep = t.expand(latents.shape[0])
                     latent_model_input = latents
                     noise_pred_skip_layers = self.transformer(
-                        hidden_states=latent_model_input,
+                        hidden_states=latent_model_input.to(
+                            self.transformer.dtype),
                         timestep=timestep,
-                        encoder_hidden_states=original_prompt_embeds,
-                        pooled_projections=original_pooled_prompt_embeds,
+                        encoder_hidden_states=original_prompt_embeds.to(
+                            self.transformer.dtype),
+                        pooled_projections=original_pooled_prompt_embeds.to(
+                            self.transformer.dtype),
                         joint_attention_kwargs=self.joint_attention_kwargs,
                         return_dict=False,
                         skip_layers=skip_guidance_layers,
@@ -381,10 +385,13 @@ def pipeline_with_logprob(
                     2) if self.do_classifier_free_guidance else latents_ori
                 with self.transformer.disable_adapter():
                     noise_pred = self.transformer(
-                        hidden_states=latent_model_input,
+                        hidden_states=latent_model_input.to(
+                            self.transformer.dtype),
                         timestep=timestep,
-                        encoder_hidden_states=prompt_embeds,
-                        pooled_projections=pooled_prompt_embeds,
+                        encoder_hidden_states=prompt_embeds.to(
+                            self.transformer.dtype),
+                        pooled_projections=pooled_prompt_embeds.to(
+                            self.transformer.dtype),
                         joint_attention_kwargs=self.joint_attention_kwargs,
                         return_dict=False,
                     )[0]
@@ -402,10 +409,13 @@ def pipeline_with_logprob(
                         timestep = t.expand(latents_ori.shape[0])
                         latent_model_input = latents_ori
                         noise_pred_skip_layers = self.transformer(
-                            hidden_states=latent_model_input,
+                            hidden_states=latent_model_input.to(
+                                self.transformer.dtype),
                             timestep=timestep,
-                            encoder_hidden_states=original_prompt_embeds,
-                            pooled_projections=original_pooled_prompt_embeds,
+                            encoder_hidden_states=original_prompt_embeds.to(
+                                self.transformer.dtype),
+                            pooled_projections=original_pooled_prompt_embeds.
+                            to(self.transformer.dtype),
                             joint_attention_kwargs=self.joint_attention_kwargs,
                             return_dict=False,
                             skip_layers=skip_guidance_layers,

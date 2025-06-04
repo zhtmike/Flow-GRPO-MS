@@ -29,7 +29,7 @@ class DistributedKRepeatSampler(Sampler):
     def __init__(self, dataset, batch_size, k, num_replicas, rank, seed=0):
         # we should expect the sampler to be run infinitely, but somehow it does not have this behavior
         # we manuutally set num_samples to be big enough
-        super().__init__(num_samples=len(dataset) * 1000)
+        super().__init__(num_samples=len(dataset))
         self.dataset = dataset
         self.batch_size = batch_size
         self.k = k

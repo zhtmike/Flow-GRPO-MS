@@ -28,6 +28,7 @@ from flow_grpo.diffusers_patch.sd3_sde_with_logprob import \
     sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_sd3 import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
+from flow_grpo.optim import BF16AdamW
 from flow_grpo.scorer import MultiScorer
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.util import (clip_by_global_norm, gather, map_, requires_grad_,
@@ -90,10 +91,11 @@ class NetWithLoss(nn.Cell):
                          pooled_embeds, sigma, sigma_prev):
         if self.args.cfg:
             noise_pred = self.transformer(
-                hidden_states=mint.cat([latents] * 2),
+                hidden_states=mint.cat([latents] * 2).to(
+                    self.transformer.dtype),
                 timestep=mint.cat([timesteps] * 2),
-                encoder_hidden_states=embeds,
-                pooled_projections=pooled_embeds,
+                encoder_hidden_states=embeds.to(self.transformer.dtype),
+                pooled_projections=pooled_embeds.to(self.transformer.dtype),
                 return_dict=False,
             )[0]
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -101,10 +103,10 @@ class NetWithLoss(nn.Cell):
                           (noise_pred_text - noise_pred_uncond))
         else:
             noise_pred = self.transformer(
-                hidden_states=latents,
+                hidden_states=latents.to(self.transformer.dtype),
                 timestep=timesteps,
-                encoder_hidden_states=embeds,
-                pooled_projections=pooled_embeds,
+                encoder_hidden_states=embeds.to(self.transformer.dtype),
+                pooled_projections=pooled_embeds.to(self.transformer.dtype),
                 return_dict=False,
             )[0]
 
@@ -340,6 +342,7 @@ def train(args: argparse.Namespace):
         else:
             pipeline.transformer = get_peft_model(pipeline.transformer,
                                                   transformer_lora_config)
+    pipeline.transformer.to(inference_dtype)
 
     trainable_parameters = ms.ParameterTuple(
         filter(lambda p: p.requires_grad,
@@ -370,11 +373,11 @@ def train(args: argparse.Namespace):
     else:
         ema = None
 
-    optimizer = mint.optim.AdamW(trainable_parameters,
-                                 lr=args.learning_rate,
-                                 betas=(args.adam_beta1, args.adam_beta2),
-                                 weight_decay=args.adam_weight_decay,
-                                 eps=args.adam_epsilon)
+    optimizer = BF16AdamW(trainable_parameters,
+                          lr=args.learning_rate,
+                          betas=(args.adam_beta1, args.adam_beta2),
+                          weight_decay=args.adam_weight_decay,
+                          eps=args.adam_epsilon)
 
     # prepare prompt and reward fn
     reward_fn = MultiScorer(args.reward_fn)
@@ -464,6 +467,11 @@ def train(args: argparse.Namespace):
     loss_and_grad_fn = ms.value_and_grad(net_with_loss,
                                          grad_position=None,
                                          weights=optimizer.parameters)
+
+    # we always accumulate gradients across timesteps; we want args.gradient_accumulation_steps to be the
+    # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
+    # the total number of optimizer steps to accumulate across.
+    gradient_accumulation_steps = args.gradient_accumulation_steps * num_train_timesteps
 
     for epoch in range(first_epoch, args.num_epochs):
         #################### SAMPLING ####################
@@ -667,11 +675,12 @@ def train(args: argparse.Namespace):
 
             # train
             pipeline.transformer.set_train(True)
-            grad_accumulated = None
+            pipeline.scheduler.set_timesteps(num_train_timesteps)
             train_timesteps = list(range(num_train_timesteps))
+            grad_accumulated = None
 
-            if args.gradient_accumulation_steps > 1:
-                loss_scaler = ms.Tensor(1 / args.gradient_accumulation_steps)
+            if gradient_accumulation_steps > 1:
+                loss_scaler = ms.Tensor(1 / gradient_accumulation_steps)
             else:
                 loss_scaler = None
 
@@ -738,7 +747,7 @@ def train(args: argparse.Namespace):
                         loss_scaler=loss_scaler)
 
                     if (i * num_train_timesteps +
-                            j) % args.gradient_accumulation_steps == 0:
+                            j) % gradient_accumulation_steps == 0:
                         grad_accumulated = grad
                         logger.debug("Accumuated Gradient is reinitialized.")
                     else:
@@ -746,7 +755,7 @@ def train(args: argparse.Namespace):
                         logger.debug("Accumuated Gradient is updated.")
 
                     if (i * num_train_timesteps + j +
-                            1) % args.gradient_accumulation_steps == 0:
+                            1) % gradient_accumulation_steps == 0:
                         syn_gradients(grad_accumulated)
                         clip_by_global_norm(grad_accumulated,
                                             max_norm=args.max_grad_norm)
@@ -789,11 +798,11 @@ def main():
         "jpeg_compressibility": 1
     }  # we should use {"ocr": 1}, but not implemented yet :(
     args.dataset = "dataset/ocr"
-    args.num_epochs = 100  # original 100000
+    args.num_epochs = 100000
     args.num_inner_epochs = 1
-    args.train_batch_size = 3  # original 12, oom
-    args.test_batch_size = 3  # original 16
-    args.num_batches_per_epoch = 48  # original 12, we reduce the batch size by 4 times, increase the accumlation steps by 4 times to align the orignal setting.
+    args.train_batch_size = 6  # original 12, oom
+    args.test_batch_size = 6  # original 16
+    args.num_batches_per_epoch = 12
     args.num_image_per_prompt = 6
     args.gradient_accumulation_steps = args.num_batches_per_epoch // 2
     args.eval_freq = 2  # original 60
