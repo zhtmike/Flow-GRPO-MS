@@ -184,3 +184,4 @@ aclinit.json
 fusion_result.json
 kernel_meta/
 output/
+rank_*/
