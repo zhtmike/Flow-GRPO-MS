@@ -18,7 +18,7 @@ def requires_grad_(cell: nn.Cell, requires_grad: bool = True) -> None:
         p.requires_grad = requires_grad
 
 
-def gather(x: ms.Tensor):
+def gather(x: ms.Tensor) -> ms.Tensor:
     """
     Gather the tensor across all devices in the distributed environment.
     """
