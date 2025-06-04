@@ -29,7 +29,7 @@ from flow_grpo.diffusers_patch.sd3_sde_with_logprob import \
 from flow_grpo.diffusers_patch.train_dreambooth_lora_sd3 import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.optim import BF16AdamW
-from flow_grpo.scorer import MultiScorer
+from flow_grpo.scorer import AVAILABLE_SCORERS, MultiScorer
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.util import (clip_by_global_norm, gather, map_, requires_grad_,
                             save_checkpoint, syn_gradients)
@@ -380,7 +380,10 @@ def train(args: argparse.Namespace):
                           eps=args.adam_epsilon)
 
     # prepare prompt and reward fn
-    reward_fn = MultiScorer(args.reward_fn)
+    if args.reward in AVAILABLE_SCORERS:
+        scorers = {args.reward: 1.0}
+
+    reward_fn = MultiScorer(scorers)
 
     # set seed (device_specific is very important to get different prompts on different devices)
     ms.set_seed(args.seed + process_index)
@@ -776,7 +779,12 @@ def train(args: argparse.Namespace):
 
 
 def main():
-    parser = argparse.ArgumentParser(usage="train sd3 with GRPO")
+    parser = argparse.ArgumentParser(usage="Training SD3 with GRPO")
+    group = parser.add_argument_group("general arguments")
+    group.add_argument("--reward",
+                       required=True,
+                       choices=AVAILABLE_SCORERS.keys(),
+                       help="Reward function to use for training")
     args = parser.parse_args()
 
     # TODO: hard coded, refactor later
@@ -794,9 +802,6 @@ def main():
     args.adam_weight_decay = 1e-4
     args.adam_epsilon = 1e-8
     args.max_grad_norm = 1.0
-    args.reward_fn = {
-        "jpeg_compressibility": 1
-    }  # we should use {"ocr": 1}, but not implemented yet :(
     args.dataset = "dataset/ocr"
     args.num_epochs = 100000
     args.num_inner_epochs = 1

@@ -1,1 +1,1 @@
-from .multi import MultiScorer
+from .multi import AVAILABLE_SCORERS, MultiScorer

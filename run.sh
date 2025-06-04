@@ -14,4 +14,4 @@ export TOKENIZERS_PARALLELISM=False
 # python -m flow_grpo.scorer.pickscore
 
 # training with one card
-msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts/train_sd3.py
+msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts/train_sd3.py --reward jpeg_compressibility

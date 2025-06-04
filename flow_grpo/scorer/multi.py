@@ -7,7 +7,7 @@ from PIL import Image
 
 from .scorer import Scorer
 
-SCORERS = {
+AVAILABLE_SCORERS = {
     "aesthetic": ("aesthetic", "AestheticScorer"),
     "jpeg_compressibility": ("compression", "JpegCompressibilityScorer"),
     "jpeg_imcompressibility": ("compression", "JpegImcompressibilityScorer"),
@@ -25,7 +25,7 @@ class MultiScorer(Scorer):
 
     def init_scorer_cls(self):
         for score_name in self.scorers.keys():
-            module, cls = SCORERS[score_name]
+            module, cls = AVAILABLE_SCORERS[score_name]
             module = "flow_grpo.scorer." + module
             module = importlib.import_module(module)
             cls = getattr(module, cls)
