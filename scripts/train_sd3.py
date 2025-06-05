@@ -245,6 +245,8 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
 
 
 def train(args: argparse.Namespace):
+    ms.set_seed(args.seed)
+
     dist.init_process_group()
     num_processes = dist.get_world_size()
     process_index = dist.get_rank()
@@ -265,9 +267,6 @@ def train(args: argparse.Namespace):
     num_train_timesteps = int(args.num_steps * args.timestep_fraction)
 
     logger.info(f"\n{args}")
-
-    # set the same seed for model inialization
-    ms.set_seed(args.seed)
 
     # load scheduler, tokenizer and models.
     if args.debug:
@@ -385,19 +384,16 @@ def train(args: argparse.Namespace):
 
     reward_fn = MultiScorer(scorers)
 
-    # set seed (device_specific is very important to get different prompts on different devices)
-    ms.set_seed(args.seed + process_index)
-
     train_dataset = TextPromptDataset(args.dataset, 'train')
     test_dataset = TextPromptDataset(args.dataset,
                                      'test',
                                      max_num=args.validation_num)
-    train_sampler = DistributedKRepeatSampler(dataset=train_dataset,
-                                              batch_size=args.train_batch_size,
+    train_sampler = DistributedKRepeatSampler(batch_size=args.train_batch_size,
                                               k=args.num_image_per_prompt,
-                                              num_replicas=num_processes,
-                                              rank=process_index,
-                                              seed=args.seed)
+                                              num_shards=num_processes,
+                                              shard_id=process_index,
+                                              num_iters=args.num_epochs *
+                                              args.num_batches_per_epoch)
 
     # create dataloader
     train_dataloader = GeneratorDataset(train_dataset,

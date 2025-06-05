@@ -26,34 +26,33 @@ class TextPromptDataset:
 
 class DistributedKRepeatSampler(Sampler):
 
-    def __init__(self, dataset, batch_size, k, num_replicas, rank, seed=0):
-        # we should expect the sampler to be run infinitely, but somehow it does not have this behavior
-        # we manuutally set num_samples to be big enough
-        super().__init__(num_samples=len(dataset))
-        self.dataset = dataset
+    def __init__(self,
+                 batch_size: int,
+                 k: int = 1,
+                 num_shards: Optional[int] = None,
+                 shard_id: Optional[int] = None,
+                 num_iters: Optional[int] = None) -> None:
+        super().__init__()
         self.batch_size = batch_size
         self.k = k
-        self.num_replicas = num_replicas
-        self.rank = rank
-        self.seed = seed
-
-        self.total_samples = self.num_replicas * self.batch_size
-        assert self.total_samples % self.k == 0, f"k can not div n*b, k{k}-num_replicas{num_replicas}-batch_size{batch_size}"
-        self.m = self.total_samples // self.k
-        self.epoch = 0
+        self.num_shards = num_shards if num_shards is not None else 1
+        self.shard_id = shard_id if shard_id is not None else 0
+        self.num_iters = num_iters
+        if self.num_shards * self.batch_size % self.k != 0:
+            raise ValueError(
+                f"num_shards * batch_size ({self.num_shards * self.batch_size}) must be divisible by k ({self.k})"
+            )
+        self.sample_size = self.num_shards * self.batch_size // self.k
 
     def __iter__(self):
-        while True:
-            g = np.random.default_rng(self.seed + self.epoch)
-            indices = g.permutation(len(self.dataset))[:self.m]
-            repeated_indices = [idx for idx in indices for _ in range(self.k)]
+        num_iters = self.num_iters if self.num_iters is not None else self.dataset_size
+        for _ in range(num_iters):
+            sample_indices = np.random.choice(self.dataset_size,
+                                              self.sample_size,
+                                              replace=False)
+            sample_indices = np.repeat(sample_indices, self.k)
+            sample_indices = np.random.permutation(sample_indices)
 
-            shuffled_indices = g.permutation(len(repeated_indices))
-            shuffled_samples = [repeated_indices[i] for i in shuffled_indices]
-            per_card_samples = []
-            for i in range(self.num_replicas):
-                start = i * self.batch_size
-                end = start + self.batch_size
-                per_card_samples.append(shuffled_samples[start:end])
-            self.epoch += 1
-            yield per_card_samples[self.rank]
+            start = self.shard_id * self.batch_size
+            end = start + self.batch_size
+            yield sample_indices[start:end]
