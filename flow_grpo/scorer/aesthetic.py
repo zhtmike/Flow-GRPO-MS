@@ -68,7 +68,7 @@ class AestheticScorer(Scorer):
 
 class MLP(nn.Cell):
 
-    def __init__(self, dtype: ms.Type = ms.float32):
+    def __init__(self, dtype: ms.Type = ms.float32) -> None:
         super().__init__()
         self.layers = nn.SequentialCell(mint.nn.Linear(768, 1024, dtype=dtype),
                                         mint.nn.Dropout(0.2),
@@ -79,7 +79,7 @@ class MLP(nn.Cell):
                                         mint.nn.Linear(64, 16, dtype=dtype),
                                         mint.nn.Linear(16, 1, dtype=dtype))
 
-    def construct(self, embed):
+    def construct(self, embed: ms.Tensor) -> ms.Tensor:
         return self.layers(embed)
 
 

@@ -15,7 +15,7 @@ from .scorer import Scorer
 class PickScoreScorer(Scorer):
     _DEFAULT_MODEL = "yuvalkirstain/PickScore_v1"
 
-    def __init__(self, dtype: ms.Type = ms.bfloat16):
+    def __init__(self, dtype: ms.Type = ms.bfloat16) -> None:
         super().__init__()
         model_path = os.environ.get("PICKSCORE_PATH", self._DEFAULT_MODEL)
         self.processor = AutoProcessor.from_pretrained(model_path)

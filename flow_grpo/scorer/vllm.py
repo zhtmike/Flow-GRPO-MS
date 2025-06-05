@@ -92,7 +92,7 @@ class QwenVLVLLMScorer(VLLMSScorer):
             },
             {
                 "type": "text",
-                "text": self.task
+                "text": self._task
             },
         ]
         return query
