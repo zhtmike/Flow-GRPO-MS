@@ -633,6 +633,11 @@ def train(args: argparse.Namespace):
         # Filter out samples where the entire time dimension of advantages is zero
         samples = {k: v[mask] for k, v in samples.items()}
 
+        if samples["advantages"].size == 0:
+            logger.warning(
+                "No samples left after filtering. Skipping this epoch.")
+            continue
+
         total_batch_size, num_timesteps = samples["timesteps"].shape
         assert num_timesteps == args.num_steps
 
