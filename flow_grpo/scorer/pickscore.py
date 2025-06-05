@@ -11,14 +11,13 @@ from transformers import AutoProcessor
 
 from .scorer import Scorer
 
-DEFAULT_MODEL = "yuvalkirstain/PickScore_v1"
-
 
 class PickScoreScorer(Scorer):
+    _DEFAULT_MODEL = "yuvalkirstain/PickScore_v1"
 
     def __init__(self, dtype: ms.Type = ms.bfloat16):
         super().__init__()
-        model_path = os.environ.get("PICKSCORE_PATH", DEFAULT_MODEL)
+        model_path = os.environ.get("PICKSCORE_PATH", self._DEFAULT_MODEL)
         self.processor = AutoProcessor.from_pretrained(model_path)
         with nn.no_init_parameters():
             self.model: CLIPModel = AutoModel.from_pretrained(

@@ -14,14 +14,13 @@ from transformers import CLIPProcessor
 
 from .scorer import Scorer
 
-DEFAULT_MODEL = "openai/clip-vit-large-patch14"
-
 
 class AestheticScorer(Scorer):
+    _DEFAULT_MODEL = "openai/clip-vit-large-patch14"
 
     def __init__(self, dtype: ms.Type = ms.bfloat16) -> None:
         super().__init__()
-        model_path = os.environ.get("CLIP_PATH", DEFAULT_MODEL)
+        model_path = os.environ.get("CLIP_PATH", self._DEFAULT_MODEL)
         self.processor = CLIPProcessor.from_pretrained(model_path)
         with nn.no_init_parameters():
             self.clip = CLIPModel.from_pretrained(model_path,

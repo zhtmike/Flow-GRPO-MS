@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import os
 import re
@@ -5,17 +6,45 @@ from io import BytesIO
 from typing import List, Optional, Union
 
 import mindspore as ms
-import mindspore.nn as nn
 import numpy as np
-from mindone.transformers import Qwen2_5_VLForConditionalGeneration
+from openai import AsyncOpenAI
 from PIL import Image
-from qwen_vl_utils import process_vision_info
-from transformers import AutoProcessor, Qwen2VLProcessor
 
 from .scorer import Scorer
 
 
-class QwenVLScorer(Scorer):
+class VLLMSScorer(Scorer):
+
+    @staticmethod
+    async def async_process_queries(queries: List[str], model_path: str,
+                                    base_url: str) -> List[str]:
+        results = await asyncio.gather(
+            *(VLLMSScorer._async_query_openai(query, model_path, base_url)
+              for query in queries))
+        return results
+
+    @staticmethod
+    async def _async_query_openai(query: str, model_path: str,
+                                  base_url: str) -> str:
+        aclient = AsyncOpenAI(base_url=base_url, api_key="EMPTY")
+        completion = await aclient.chat.completions.create(
+            model=model_path,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant."
+                },
+                {
+                    "role": "user",
+                    "content": query,
+                },
+            ],
+            temperature=0,
+        )
+        return completion.choices[0].message.content
+
+
+class QwenVLVLLMScorer(VLLMSScorer):
     _DEFAULT_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
     _task = """
         Your role is to evaluate the aesthetic quality score of given images.
@@ -32,17 +61,10 @@ class QwenVLScorer(Scorer):
         <Score>X</Score>
     """
 
-    def __init__(self, dtype: ms.Type = ms.bfloat16) -> None:
+    def __init__(self, base_url: str) -> None:
         super().__init__()
-        model_path = os.environ.get("QWEN_VL_PATH", self._DEFAULT_MODEL)
-        with nn.no_init_parameters():
-            self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                model_path,
-                mindspore_dtype=dtype,
-                attn_implementation="flash_attention_2",
-            )
-        self.processor: Qwen2VLProcessor = AutoProcessor.from_pretrained(
-            model_path, use_fast=False, padding_side="left")
+        self.base_url = base_url
+        self.model_path = os.environ.get("QWEN_VL_PATH", self._DEFAULT_MODEL)
 
     def __call__(self,
                  images: Union[List[Image.Image], np.ndarray, ms.Tensor],
@@ -51,55 +73,29 @@ class QwenVLScorer(Scorer):
             images = self.array_to_images(images)
 
         images_base64 = [self.pil_image_to_base64(image) for image in images]
-        messages = []
-        for base64_qwen in images_base64:
-            messages.append([
-                {
-                    "role":
-                    "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "image": base64_qwen
-                        },
-                        {
-                            "type": "text",
-                            "text": self._task
-                        },
-                    ],
-                },
-            ])
-
-        # Preparation for batch inference
-        texts = [
-            self.processor.apply_chat_template(msg,
-                                               tokenize=False,
-                                               add_generation_prompt=True)
-            for msg in messages
+        queries = [
+            self.prepare_query(image_base64) for image_base64 in images_base64
         ]
-        image_inputs, video_inputs = process_vision_info(messages)
-        inputs = self.processor(
-            text=texts,
-            images=image_inputs,
-            videos=video_inputs,
-            padding=True,
-            return_tensors="np",
-        )
-        for k, v in inputs.items():
-            inputs[k] = ms.Tensor(v)
-
-        # Batch Inference
-        generated_ids = self.model.generate(**inputs, max_new_tokens=2048)
-        generated_ids_trimmed = [
-            out_ids[len(in_ids):]
-            for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-        ]
-        output_texts = self.processor.batch_decode(
-            generated_ids_trimmed,
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False)
-        rewards = self.extract_scores(output_texts)
+        results = asyncio.run(
+            self.async_process_queries(queries, self.model_path,
+                                       self.base_url))
+        rewards = self.extract_scores(results)
         return rewards
+
+    def prepare_query(self, image_base64: str) -> List:
+        query = [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image_base64
+                },
+            },
+            {
+                "type": "text",
+                "text": self.task
+            },
+        ]
+        return query
 
     @staticmethod
     def pil_image_to_base64(image: Image.Image) -> str:
@@ -122,12 +118,12 @@ class QwenVLScorer(Scorer):
         return scores
 
 
-def test_qwen_vl_scorer():
-    scorer = QwenVLScorer(dtype=ms.bfloat16)
+def test_qwen_vl_vllm_scorer():
+    scorer = QwenVLVLLMScorer("http://0.0.0.0:9529/v1")
     images = ["assets/good.jpg", "assets/fair.jpg", "assets/poor.jpg"]
     pil_images = [Image.open(img) for img in images]
     print(scorer(images=pil_images))
 
 
 if __name__ == "__main__":
-    test_qwen_vl_scorer()
+    test_qwen_vl_vllm_scorer()
