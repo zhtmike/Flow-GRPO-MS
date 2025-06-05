@@ -811,9 +811,9 @@ def main():
     args.num_batches_per_epoch = 12
     args.num_image_per_prompt = 6
     args.gradient_accumulation_steps = args.num_batches_per_epoch // 2
-    args.eval_freq = 1  # original 60
+    args.eval_freq = 2  # original 60
     args.eval_num_steps = 40
-    args.save_freq = 1  # original 60
+    args.save_freq = 2  # original 60
     args.cfg = True
     args.beta = 0.001
     args.adv_clip_max = 5
