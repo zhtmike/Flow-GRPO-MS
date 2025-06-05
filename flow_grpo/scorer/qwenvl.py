@@ -25,7 +25,8 @@ class QwenVLScorer(Scorer):
         4. Good: Sharp, good exposure, vibrant colors, thoughtful composition with a clear focal point.
         5. Excellent: Exceptional clarity, perfect exposure, rich colors, masterful composition with emotional impact.
 
-        Please first provide a detailed analysis of the evaluation process, including the criteria for judging aesthetic quality, within the <Thought> tag. Then, give a final score from 1 to 5 within the <Score> tag.
+        Please first provide a detailed analysis of the evaluation process, including the criteria for judging aesthetic quality, within the <Thought> tag. 
+        Then, give a final score from 1 to 5 within the <Score> tag.
         <Thought>
         [Analyze the evaluation process in detail here]
         </Thought>

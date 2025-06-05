@@ -9,11 +9,12 @@ from .scorer import Scorer
 
 AVAILABLE_SCORERS = {
     "aesthetic": ("aesthetic", "AestheticScorer"),
-    "jpeg_compressibility": ("compression", "JpegCompressibilityScorer"),
-    "jpeg_imcompressibility": ("compression", "JpegImcompressibilityScorer"),
+    "jpeg-compressibility": ("compression", "JpegCompressibilityScorer"),
+    "jpeg-imcompressibility": ("compression", "JpegImcompressibilityScorer"),
     "pickscore": ("pickscore", "PickScoreScorer"),
     "qwenvl": ("qwenvl", "QwenVLScorer"),
     "qwenvl-vllm": ("vllm", "QwenVLVLLMScorer"),
+    "unified-reward-vllm": ("vllm", "UnifiedRewardVLLMScorer"),
 }
 
 
@@ -56,7 +57,7 @@ class MultiScorer(Scorer):
 
 
 def test_multi_scorer():
-    scorers = {"jpeg_compressibility": 1.0}
+    scorers = {"jpeg-compressibility": 1.0}
     scorer = MultiScorer(scorers)
     images = ["assets/good.jpg", "assets/fair.jpg", "assets/poor.jpg"]
     pil_images = [Image.open(img) for img in images]

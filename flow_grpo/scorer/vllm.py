@@ -54,7 +54,8 @@ class QwenVLVLLMScorer(VLLMSScorer):
         4. Good: Sharp, good exposure, vibrant colors, thoughtful composition with a clear focal point.
         5. Excellent: Exceptional clarity, perfect exposure, rich colors, masterful composition with emotional impact.
 
-        Please first provide a detailed analysis of the evaluation process, including the criteria for judging aesthetic quality, within the <Thought> tag. Then, give a final score from 1 to 5 within the <Score> tag.
+        Please first provide a detailed analysis of the evaluation process, including the criteria for judging aesthetic quality, within the <Thought> tag. 
+        Then, give a final score from 1 to 5 within the <Score> tag.
         <Thought>
         [Analyze the evaluation process in detail here]
         </Thought>
@@ -118,6 +119,82 @@ class QwenVLVLLMScorer(VLLMSScorer):
         return scores
 
 
+class UnifiedRewardVLLMScorer(VLLMSScorer):
+    _DEFAULT_MODEL = "CodeGoat24/UnifiedReward-qwen-7b"
+    _task = """
+        f"<image>\nYou are given a text caption and a generated image based on that caption. 
+        Your task is to evaluate this image based on two key criteria:
+        1. Alignment with the Caption: Assess how well this image aligns with the provided caption. 
+        Consider the accuracy of depicted objects, their relationships, and attributes as described in the caption.
+        2. Overall Image Quality: Examine the visual quality of this image, including clarity, detail preservation, 
+        color accuracy, and overall aesthetic appeal.
+        Based on the above criteria, assign a score from 1 to 5 after \'Final Score:\'.
+        Your task is provided as follows:\nText Caption: [{}]"
+    """
+
+    def __init__(self, base_url: str) -> None:
+        super().__init__()
+        self.base_url = base_url
+        self.model_path = os.environ.get("UNIFIEDREWARD_PATH",
+                                         self._DEFAULT_MODEL)
+
+    def __call__(self,
+                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
+                 prompts: Optional[List[str]] = None) -> List[float]:
+        if isinstance(images, (np.ndarray, ms.Tensor)):
+            images = self.array_to_images(images)
+
+        images_base64 = [self.pil_image_to_base64(image) for image in images]
+        queries = [
+            self.prepare_query(image_base64, prompt)
+            for image_base64, prompt in zip(images_base64, prompts)
+        ]
+        results = asyncio.run(
+            self.async_process_queries(queries, self.model_path,
+                                       self.base_url))
+        rewards = self.extract_scores(results)
+        return rewards
+
+    def prepare_query(self, image_base64: str, prompt: str) -> List:
+        query = [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image_base64
+                },
+            },
+            {
+                "type": "text",
+                "text": self._task.format(prompt)
+            },
+        ]
+        return query
+
+    @staticmethod
+    def pil_image_to_base64(image: Image.Image) -> str:
+        buffered = BytesIO()
+        image.save(buffered, format="PNG")
+        encoded_image_text = base64.b64encode(
+            buffered.getvalue()).decode("utf-8")
+        base64_qwen = f"data:image;base64,{encoded_image_text}"
+        return base64_qwen
+
+    @staticmethod
+    def extract_scores(output_text: List[str]) -> List[float]:
+        scores = []
+        pattern = r"Final Score:\s*([1-5](?:\.\d+)?)"
+        for text in output_text:
+            match = re.search(pattern, text)
+            if match:
+                try:
+                    scores.append(float(match.group(1)))
+                except ValueError:
+                    scores.append(0.0)
+            else:
+                scores.append(0.0)
+        return scores
+
+
 def test_qwen_vl_vllm_scorer():
     scorer = QwenVLVLLMScorer("http://0.0.0.0:9529/v1")
     images = ["assets/good.jpg", "assets/fair.jpg", "assets/poor.jpg"]
@@ -125,5 +202,14 @@ def test_qwen_vl_vllm_scorer():
     print(scorer(images=pil_images))
 
 
+def test_unified_reward_vllm_scorer():
+    scorer = UnifiedRewardVLLMScorer("http://0.0.0.0:9529/v1")
+    images = ["assets/good.jpg", "assets/fair.jpg", "assets/poor.jpg"]
+    prompts = ["photo of apple"] * len(images)
+    pil_images = [Image.open(img) for img in images]
+    print(scorer(images=pil_images, prompts=prompts))
+
+
 if __name__ == "__main__":
-    test_qwen_vl_vllm_scorer()
+    # test_qwen_vl_vllm_scorer()
+    test_unified_reward_vllm_scorer()
