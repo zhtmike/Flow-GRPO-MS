@@ -780,55 +780,189 @@ def train(args: argparse.Namespace):
 
 
 def main():
-    parser = argparse.ArgumentParser(usage="Training SD3 with GRPO")
+    parser = argparse.ArgumentParser(
+        usage="Training SD3 with GRPO",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    # =========== general arguments ===========
     group = parser.add_argument_group("general arguments")
     group.add_argument("--reward",
                        required=True,
                        choices=AVAILABLE_SCORERS.keys(),
                        help="Reward function to use for training")
+    group.add_argument("--resolution",
+                       default=512,
+                       type=int,
+                       help="Image resolution for training and sampling")
+    group.add_argument("--model",
+                       default=DEFAULT_MODEL,
+                       type=str,
+                       help="Path to the pretrained model")
+    group.add_argument(
+        "--run-name",
+        type=str,
+        help="Name of the run for logging and saving checkpoints")
+    group.add_argument("--resume-from",
+                       type=str,
+                       help="Path to the checkpoint to resume from")
+    group.add_argument("--seed",
+                       type=int,
+                       default=42,
+                       help="Random seed for reproducibility")
+    group.add_argument(
+        "--debug",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Whether to run in debug mode with a single layer network")
+
+    # ========== training arguments ===========
+    group = parser.add_argument_group("training arguments")
+    group.add_argument(
+        '--num-steps',
+        type=int,
+        default=10,
+        help=
+        "Number of steps to sample from the diffusion model during training stage"
+    )
+    group.add_argument("--timestep-fraction",
+                       type=float,
+                       default=1.0,
+                       help="Fraction of timesteps to use for training")
+    group.add_argument("--mixed-precision",
+                       type=str,
+                       default="bf16",
+                       choices=["fp16", "bf16", "fp32"],
+                       help="Mixed precision to use for training")
+    group.add_argument("--learning-rate",
+                       type=float,
+                       default=3e-4,
+                       help="Learning rate for the optimizer")
+    group.add_argument("--adam-beta1",
+                       type=float,
+                       default=0.9,
+                       help="Beta1 for Adam optimizer")
+    group.add_argument("--adam-beta2",
+                       type=float,
+                       default=0.999,
+                       help="Beta2 for Adam optimizer")
+    group.add_argument("--adam-weight-decay",
+                       type=float,
+                       default=1e-4,
+                       help="Weight decay for Adam optimizer")
+    group.add_argument("--adam-epsilon",
+                       type=float,
+                       default=1e-8,
+                       help="Epsilon for Adam optimizer")
+    group.add_argument("--max-grad-norm",
+                       type=float,
+                       default=1.0,
+                       help="Maximum gradient norm for clipping")
+    group.add_argument('--num-epochs',
+                       type=int,
+                       default=1000,
+                       help="Number of epochs to train for")
+    group.add_argument("--num-inner-epochs",
+                       type=int,
+                       default=1,
+                       help="Number of inner epochs to train for")
+    group.add_argument("--train-batch-size",
+                       type=int,
+                       default=6,
+                       help="Batch size for training")
+    group.add_argument("--num-batches-per-epoch",
+                       type=int,
+                       default=12,
+                       help="Number of batches per epoch")
+    group.add_argument("--num-image-per-prompt",
+                       type=int,
+                       default=6,
+                       help="Number of images to generate per prompt")
+    group.add_argument("--gradient-accumulation-steps",
+                       type=int,
+                       default=6,
+                       help="Number of gradient accumulation steps")
+    group.add_argument("--save-freq",
+                       type=int,
+                       default=2,
+                       help="Frequency of saving checkpoints during training")
+    group.add_argument("--beta",
+                       type=float,
+                       default=0.001,
+                       help="KL reward coefficient for training")
+    group.add_argument("--adv-clip-max",
+                       type=float,
+                       default=5.0,
+                       help="Maximum value for the advantage clipping")
+    group.add_argument("--clip-range",
+                       type=float,
+                       default=1e-4,
+                       help="Clip range for the policy loss")
+    group.add_argument("--use-lora",
+                       action=argparse.BooleanOptionalAction,
+                       default=True,
+                       help="Whether to use LoRA for training")
+    group.add_argument("--lora-path",
+                       type=str,
+                       default=None,
+                       help="Path to the LoRA weights to load")
+    group.add_argument(
+        "--per-prompt-stat-tracking",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to track per-prompt statistics for rewards")
+    group.add_argument(
+        "--global-std",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use global standard deviation for rewards")
+
+    # ========== sampling arguments ===========
+    group = parser.add_argument_group("sampling arguments")
+    group.add_argument('--guidance-scale',
+                       type=float,
+                       default=4.5,
+                       help="Guidance scale for classifier-free guidance")
+    group.add_argument("--kl-reward",
+                       type=float,
+                       default=0.0,
+                       help="KL reward coefficient for sampling")
+    group.add_argument("--test-batch-size",
+                       type=int,
+                       default=6,
+                       help="Batch size for evaluation")
+    group.add_argument("--eval-freq",
+                       type=int,
+                       default=2,
+                       help="Frequency of evaluation during training")
+    group.add_argument(
+        "--eval-num-steps",
+        type=int,
+        default=40,
+        help=
+        "Number of steps to sample from the diffusion model during evaluation")
+    group.add_argument(
+        "--cfg",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use classifier-free guidance during training")
+    group.add_argument(
+        "--validation-num",
+        type=int,
+        default=12,
+        help="Number of validation samples to generate during evaluation")
+    group.add_argument("--ema",
+                       action=argparse.BooleanOptionalAction,
+                       default=True,
+                       help="Whether to use EMA for training")
+
+    # ========== dataset arguments ===========
+    group = parser.add_argument_group("dataset arguments")
+    group.add_argument("--dataset",
+                       type=str,
+                       default="dataset/ocr",
+                       help="Path to the dataset")
+
     args = parser.parse_args()
-
-    # TODO: hard coded, refactor later
-    # we follow config general_ocr_sd3 here
-    args.num_steps = 10
-    args.guidance_scale = 4.5
-    args.resolution = 512
-    args.timestep_fraction = 1.0  # original 0.99, why?
-    args.kl_reward = 0
-    args.model = os.environ.get("SD3_PATH", DEFAULT_MODEL)
-    args.mixed_precision = "bf16"  # original fp16, but need to add loss scaler
-    args.learning_rate = 3e-4
-    args.adam_beta1 = 0.9
-    args.adam_beta2 = 0.999
-    args.adam_weight_decay = 1e-4
-    args.adam_epsilon = 1e-8
-    args.max_grad_norm = 1.0
-    args.dataset = "dataset/ocr"
-    args.num_epochs = 1000
-    args.num_inner_epochs = 1
-    args.train_batch_size = 6  # original 12, oom
-    args.test_batch_size = 6
-    args.num_batches_per_epoch = 12
-    args.num_image_per_prompt = 6
-    args.gradient_accumulation_steps = args.num_batches_per_epoch // 2
-    args.eval_freq = 2
-    args.eval_num_steps = 40
-    args.save_freq = 2
-    args.cfg = True
-    args.beta = 0.001
-    args.adv_clip_max = 5
-    args.clip_range = 1e-4
-    args.run_name = ""
-    args.resume_from = ""
-    args.seed = 42
-    args.use_lora = True
-    args.lora_path = None
-    args.per_prompt_stat_tracking = True
-    args.global_std = True
-    args.validation_num = 12
-    args.ema = True
-    args.debug = False  # True to test with one layer network.
-
     train(args)
 
 

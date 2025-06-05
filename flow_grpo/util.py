@@ -7,7 +7,13 @@ import mindspore.mint as mint
 import mindspore.mint.distributed as dist
 import mindspore.nn as nn
 
-map_ = lambda *args, **kwargs: tuple(map(*args, **kwargs))
+
+def map_(*args, **kwargs) -> Tuple:
+    """
+    same as `map`, but returns a tuple instead of a iterator.
+    This is useful for when operation is done in place, to make sure the operation is applied to all elements.
+    """
+    return tuple(map(*args, **kwargs))
 
 
 def requires_grad_(cell: nn.Cell, requires_grad: bool = True) -> None:
