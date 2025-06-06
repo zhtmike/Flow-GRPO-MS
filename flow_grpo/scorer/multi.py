@@ -13,6 +13,7 @@ AVAILABLE_SCORERS = {
     "jpeg-imcompressibility": ("compression", "JpegImcompressibilityScorer"),
     "pickscore": ("pickscore", "PickScoreScorer"),
     "qwenvl": ("qwenvl", "QwenVLScorer"),
+    "qwenvl-ocr-vllm": ("vllm", "QwenVLOCRVLLMScorer"),
     "qwenvl-vllm": ("vllm", "QwenVLVLLMScorer"),
     "unified-reward-vllm": ("vllm", "UnifiedRewardVLLMScorer"),
 }
