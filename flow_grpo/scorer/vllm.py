@@ -13,13 +13,13 @@ from PIL import Image
 from .scorer import Scorer
 
 
-class VLLMSScorer(Scorer):
+class VLLMScorer(Scorer):
 
     @staticmethod
     async def async_process_queries(queries: List[str], model_path: str,
                                     base_url: str) -> List[str]:
         results = await asyncio.gather(
-            *(VLLMSScorer._async_query_openai(query, model_path, base_url)
+            *(VLLMScorer._async_query_openai(query, model_path, base_url)
               for query in queries))
         return results
 
@@ -44,7 +44,7 @@ class VLLMSScorer(Scorer):
         return completion.choices[0].message.content
 
 
-class QwenVLVLLMScorer(VLLMSScorer):
+class QwenVLVLLMScorer(VLLMScorer):
     _DEFAULT_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
     _task = (
         "Your role is to evaluate the aesthetic quality score of given images.\n"
@@ -118,7 +118,7 @@ class QwenVLVLLMScorer(VLLMSScorer):
         return scores
 
 
-class UnifiedRewardVLLMScorer(VLLMSScorer):
+class UnifiedRewardVLLMScorer(VLLMScorer):
     _DEFAULT_MODEL = "CodeGoat24/UnifiedReward-qwen-7b"
     _task = (
         "You are given a text caption and a generated image based on that caption. "
