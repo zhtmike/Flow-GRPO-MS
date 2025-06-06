@@ -15,6 +15,11 @@ from .scorer import Scorer
 
 class VLLMScorer(Scorer):
 
+    def __init__(self):
+        # following https://github.com/openai/openai-python/issues/1254
+        # we should use a single event loop for AsyncOpenAI call
+        self._loop = asyncio.new_event_loop()
+
     @staticmethod
     async def async_process_queries(queries: List[str], model_path: str,
                                     base_url: str) -> List[str]:
@@ -42,6 +47,12 @@ class VLLMScorer(Scorer):
             temperature=0,
         )
         return completion.choices[0].message.content
+
+    def __call__(self,
+                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
+                 prompts: Optional[List[str]] = None) -> List[float]:
+        raise NotImplementedError(
+            "This method should be implemented in subclasses.")
 
 
 class QwenVLVLLMScorer(VLLMScorer):
@@ -75,7 +86,7 @@ class QwenVLVLLMScorer(VLLMScorer):
         queries = [
             self.prepare_query(image_base64) for image_base64 in images_base64
         ]
-        results = asyncio.run(
+        results = self._loop.run_until_complete(
             self.async_process_queries(queries, self.model_path,
                                        self.base_url))
         rewards = self.extract_scores(results)
@@ -150,7 +161,7 @@ class UnifiedRewardVLLMScorer(VLLMScorer):
             self.prepare_query(image_base64, prompt)
             for image_base64, prompt in zip(images_base64, prompts)
         ]
-        results = asyncio.run(
+        results = self._loop.run_until_complete(
             self.async_process_queries(queries, self.model_path,
                                        self.base_url))
         rewards = self.extract_scores(results)
