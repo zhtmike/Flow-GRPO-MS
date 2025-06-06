@@ -2,9 +2,7 @@ import argparse
 import datetime
 import logging
 import os
-import time
 from collections import defaultdict
-from concurrent import futures
 from functools import partial
 from typing import Any, List, Optional
 
@@ -174,8 +172,7 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
              sample_neg_prompt_embeds: ms.Tensor,
              sample_neg_pooled_prompt_embeds: ms.Tensor, ema: EMAModuleWrapper,
              parameters: ms.ParameterTuple, outdir: str,
-             executor: futures.ThreadPoolExecutor, reward_fn: MultiScorer,
-             total: int) -> None:
+             reward_fn: MultiScorer, total: int) -> None:
     if args.ema:
         ema.copy_ema_to(parameters, store_temp=True)
 
@@ -223,10 +220,7 @@ def evaluate(pipeline_with_logprob_, args: argparse.Namespace,
             image.save(os.path.join(outdir, fname))
 
         # calcuate the validation reward
-        rewards = executor.submit(reward_fn, images, prompts)
-        # yield to to make sure reward computation starts
-        time.sleep(0)
-        rewards = rewards.result()
+        rewards = reward_fn(images, prompts)
         for k, v in rewards.items():
             all_rewards[k].extend(v)
 
@@ -428,10 +422,6 @@ def train(args: argparse.Namespace):
     if args.per_prompt_stat_tracking:
         stat_tracker = PerPromptStatTracker(args.global_std)
 
-    # executor to perform callbacks asynchronously. this is beneficial for the llava callbacks which makes a request to a
-    # remote server running llava inference.
-    executor = futures.ThreadPoolExecutor(max_workers=8)
-
     # Train!
     samples_per_epoch = (args.train_batch_size * num_processes *
                          args.num_batches_per_epoch)
@@ -500,7 +490,7 @@ def train(args: argparse.Namespace):
                 evaluate(pipeline_with_logprob, args, test_iter, pipeline,
                          text_encoders, tokenizers, sample_neg_prompt_embeds,
                          sample_neg_pooled_prompt_embeds, ema,
-                         trainable_parameters, outdir, executor, reward_fn,
+                         trainable_parameters, outdir, reward_fn,
                          len(test_dataloader))
             if i == 0 and epoch % args.save_freq == 0 and epoch > 0 and is_main_process:
                 save_checkpoint(trainable_parameters,
@@ -533,9 +523,7 @@ def train(args: argparse.Namespace):
                 args.train_batch_size, 1)  # (batch_size, num_steps)
 
             # compute rewards asynchronously
-            rewards = executor.submit(reward_fn, images, prompts)
-            # yield to to make sure reward computation starts
-            time.sleep(0)
+            rewards = reward_fn(images, prompts)
 
             samples.append({
                 "prompt_ids": prompt_ids,
@@ -550,14 +538,6 @@ def train(args: argparse.Namespace):
                 "kl": kls,
                 "rewards": rewards,
             })
-
-        # wait for all rewards to be computed
-        for sample in tqdm_(samples,
-                            desc="Waiting for rewards",
-                            disable=not is_main_process,
-                            position=0):
-            rewards = sample["rewards"].result()
-            sample["rewards"] = rewards
 
         # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
         samples = {
