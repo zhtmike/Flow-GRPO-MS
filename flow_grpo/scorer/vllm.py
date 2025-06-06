@@ -46,25 +46,23 @@ class VLLMSScorer(Scorer):
 
 class QwenVLVLLMScorer(VLLMSScorer):
     _DEFAULT_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
-    _task = """
-        Your role is to evaluate the aesthetic quality score of given images.
-        1. Bad: Extremely blurry, underexposed with significant noise, indiscernible subjects, and chaotic composition.
-        2. Poor: Noticeable blur, poor lighting, washed-out colors, and awkward composition with cut-off subjects.
-        3. Fair: In focus with adequate lighting, dull colors, decent composition but lacks creativity.
-        4. Good: Sharp, good exposure, vibrant colors, thoughtful composition with a clear focal point.
-        5. Excellent: Exceptional clarity, perfect exposure, rich colors, masterful composition with emotional impact.
+    _task = (
+        "Your role is to evaluate the aesthetic quality score of given images.\n"
+        "1. Bad: Extremely blurry, underexposed with significant noise, indiscernible subjects, and chaotic composition.\n"
+        "2. Poor: Noticeable blur, poor lighting, washed-out colors, and awkward composition with cut-off subjects.\n"
+        "3. Fair: In focus with adequate lighting, dull colors, decent composition but lacks creativity.\n"
+        "4. Good: Sharp, good exposure, vibrant colors, thoughtful composition with a clear focal point.\n"
+        "5. Excellent: Exceptional clarity, perfect exposure, rich colors, masterful composition with emotional impact.\n"
+        "Please first provide a detailed analysis of the evaluation process, including the criteria for judging aesthetic quality, within the <Thought> tag. "
+        "Then, give a final score from 1 to 5 within the <Score> tag.\n"
+        "<Thought>\n"
+        "[Analyze the evaluation process in detail here]\n"
+        "</Thought>\n"
+        "<Score>X</Score>")
 
-        Please first provide a detailed analysis of the evaluation process, including the criteria for judging aesthetic quality, within the <Thought> tag. 
-        Then, give a final score from 1 to 5 within the <Score> tag.
-        <Thought>
-        [Analyze the evaluation process in detail here]
-        </Thought>
-        <Score>X</Score>
-    """
-
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: Optional[str] = None) -> None:
         super().__init__()
-        self.base_url = base_url
+        self.base_url = os.environ.get("QWEN_VL_VLLM_URL", base_url)
         self.model_path = os.environ.get("QWEN_VL_PATH", self._DEFAULT_MODEL)
 
     def __call__(self,
@@ -116,26 +114,29 @@ class QwenVLVLLMScorer(VLLMSScorer):
                 scores.append(float(match.group(1)) / 5)
             else:
                 scores.append(0)
+        scores = [max(0, min(1, score)) for score in scores]
         return scores
 
 
 class UnifiedRewardVLLMScorer(VLLMSScorer):
     _DEFAULT_MODEL = "CodeGoat24/UnifiedReward-qwen-7b"
-    _task = """
-        f"<image>\nYou are given a text caption and a generated image based on that caption. 
-        Your task is to evaluate this image based on two key criteria:
-        1. Alignment with the Caption: Assess how well this image aligns with the provided caption. 
-        Consider the accuracy of depicted objects, their relationships, and attributes as described in the caption.
-        2. Overall Image Quality: Examine the visual quality of this image, including clarity, detail preservation, 
-        color accuracy, and overall aesthetic appeal.
-        Based on the above criteria, assign a score from 1 to 5 after \'Final Score:\'.
-        Your task is provided as follows:\nText Caption: [{}]"
-    """
+    _task = (
+        "You are given a text caption and a generated image based on that caption. "
+        "Your task is to evaluate this image based on two key criteria:\n"
+        "1. Alignment with the Caption: Assess how well this image aligns with the provided caption. "
+        "Consider the accuracy of depicted objects, their relationships, and attributes as described in the caption.\n"
+        "2. Overall Image Quality: Examine the visual quality of this image, including clarity, detail preservation, "
+        "color accuracy, and overall aesthetic appeal.\nExtract key elements from the provided text caption, "
+        "evaluate their presence in the generated image using the format: "
+        "'element (type): value' (where value=0 means not generated, and value=1 means generated), "
+        "and assign a score from 1 to 5 after 'Final Score:'.\n"
+        "Your task is provided as follows:\n"
+        "Text Caption: [{prompt}]")
 
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: Optional[str] = None) -> None:
         super().__init__()
-        self.base_url = base_url
-        self.model_path = os.environ.get("UNIFIEDREWARD_PATH",
+        self.base_url = os.environ.get("UNIFIED_REWARD_VLLM_URL", base_url)
+        self.model_path = os.environ.get("UNIFIED_REWARD_PATH",
                                          self._DEFAULT_MODEL)
 
     def __call__(self,
@@ -165,7 +166,7 @@ class UnifiedRewardVLLMScorer(VLLMSScorer):
             },
             {
                 "type": "text",
-                "text": self._task.format(prompt)
+                "text": self._task.format(prompt=prompt)
             },
         ]
         return query
@@ -187,11 +188,12 @@ class UnifiedRewardVLLMScorer(VLLMSScorer):
             match = re.search(pattern, text)
             if match:
                 try:
-                    scores.append(float(match.group(1)))
+                    scores.append(float(match.group(1)) / 5)
                 except ValueError:
                     scores.append(0.0)
             else:
                 scores.append(0.0)
+        scores = [max(0, min(1, score)) for score in scores]
         return scores
 
 

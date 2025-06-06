@@ -17,21 +17,19 @@ from .scorer import Scorer
 
 class QwenVLScorer(Scorer):
     _DEFAULT_MODEL = "Qwen/Qwen2.5-VL-7B-Instruct"
-    _task = """
-        Your role is to evaluate the aesthetic quality score of given images.
-        1. Bad: Extremely blurry, underexposed with significant noise, indiscernible subjects, and chaotic composition.
-        2. Poor: Noticeable blur, poor lighting, washed-out colors, and awkward composition with cut-off subjects.
-        3. Fair: In focus with adequate lighting, dull colors, decent composition but lacks creativity.
-        4. Good: Sharp, good exposure, vibrant colors, thoughtful composition with a clear focal point.
-        5. Excellent: Exceptional clarity, perfect exposure, rich colors, masterful composition with emotional impact.
-
-        Please first provide a detailed analysis of the evaluation process, including the criteria for judging aesthetic quality, within the <Thought> tag. 
-        Then, give a final score from 1 to 5 within the <Score> tag.
-        <Thought>
-        [Analyze the evaluation process in detail here]
-        </Thought>
-        <Score>X</Score>
-    """
+    _task = (
+        "Your role is to evaluate the aesthetic quality score of given images.\n"
+        "1. Bad: Extremely blurry, underexposed with significant noise, indiscernible subjects, and chaotic composition.\n"
+        "2. Poor: Noticeable blur, poor lighting, washed-out colors, and awkward composition with cut-off subjects.\n"
+        "3. Fair: In focus with adequate lighting, dull colors, decent composition but lacks creativity.\n"
+        "4. Good: Sharp, good exposure, vibrant colors, thoughtful composition with a clear focal point.\n"
+        "5. Excellent: Exceptional clarity, perfect exposure, rich colors, masterful composition with emotional impact.\n"
+        "Please first provide a detailed analysis of the evaluation process, including the criteria for judging aesthetic quality, within the <Thought> tag. "
+        "Then, give a final score from 1 to 5 within the <Score> tag.\n"
+        "<Thought>\n"
+        "[Analyze the evaluation process in detail here]\n"
+        "</Thought>\n"
+        "<Score>X</Score>")
 
     def __init__(self, dtype: ms.Type = ms.bfloat16) -> None:
         super().__init__()
@@ -120,6 +118,7 @@ class QwenVLScorer(Scorer):
                 scores.append(float(match.group(1)) / 5)
             else:
                 scores.append(0)
+        scores = [max(0, min(1, score)) for score in scores]
         return scores
 
 

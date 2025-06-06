@@ -64,5 +64,14 @@ def test_multi_scorer():
     print(scorer(images=pil_images))
 
 
+def test_multi_scorer_2():
+    scorers = {"unified-reward-vllm": 1.0}
+    scorer = MultiScorer(scorers)
+    images = ["assets/good.jpg", "assets/fair.jpg", "assets/poor.jpg"]
+    pil_images = [Image.open(img) for img in images]
+    prompts = ["photo of apple"] * len(images)
+    print(scorer(images=pil_images, prompts=prompts))
+
+
 if __name__ == "__main__":
-    test_multi_scorer()
+    test_multi_scorer_2()
