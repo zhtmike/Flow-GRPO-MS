@@ -26,6 +26,7 @@ from flow_grpo.diffusers_patch.sd3_sde_with_logprob import \
     sde_step_with_logprob
 from flow_grpo.diffusers_patch.train_dreambooth_lora_sd3 import encode_prompt
 from flow_grpo.ema import EMAModuleWrapper
+from flow_grpo.logging import get_logger
 from flow_grpo.optim import BF16AdamW
 from flow_grpo.scorer import AVAILABLE_SCORERS, MultiScorer
 from flow_grpo.stat_tracking import PerPromptStatTracker
@@ -36,7 +37,7 @@ DEFAULT_MODEL = "stabilityai/stable-diffusion-3.5-medium"
 
 tqdm_ = partial(tqdm, dynamic_ncols=True)
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 def init_debug_pipeline(args: argparse.Namespace) -> StableDiffusion3Pipeline:
@@ -375,6 +376,7 @@ def train(args: argparse.Namespace):
     # prepare prompt and reward fn
     scorers_weight = [1 / len(args.reward)] * len(args.reward)
     scorers = dict(zip(args.reward, scorers_weight))
+    logger.info("Using scorers: %s", scorers)
 
     reward_fn = MultiScorer(scorers)
 
@@ -948,9 +950,4 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
-    )
     main()

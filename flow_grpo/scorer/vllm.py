@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import logging
 import os
 import re
 from io import BytesIO
@@ -12,6 +13,8 @@ from openai import AsyncOpenAI
 from PIL import Image
 
 from .scorer import Scorer
+
+logger = logging.getLogger(__name__)
 
 
 class VLLMScorer(Scorer):
@@ -86,9 +89,12 @@ class QwenVLVLLMScorer(VLLMScorer):
         queries = [
             self.prepare_query(image_base64) for image_base64 in images_base64
         ]
+
         results = self._loop.run_until_complete(
             self.async_process_queries(queries, self.model_path,
                                        self.base_url))
+        logger.debug("VLLM output: %s", results)
+
         rewards = self.extract_scores(results)
         return rewards
 
@@ -160,9 +166,12 @@ class UnifiedRewardVLLMScorer(VLLMScorer):
             self.prepare_query(image_base64, prompt)
             for image_base64, prompt in zip(images_base64, prompts)
         ]
+
         results = self._loop.run_until_complete(
             self.async_process_queries(queries, self.model_path,
                                        self.base_url))
+        logger.debug("VLLM output: %s", results)
+
         rewards = self.extract_scores(results)
         return rewards
 
@@ -226,9 +235,12 @@ class QwenVLOCRVLLMScorer(VLLMScorer):
         queries = [
             self.prepare_query(image_base64) for image_base64 in images_base64
         ]
+
         results = self._loop.run_until_complete(
             self.async_process_queries(queries, self.model_path,
                                        self.base_url))
+        logger.debug("VLLM output: %s", results)
+
         rewards = self.calculate_score(results, prompts)
         return rewards
 
