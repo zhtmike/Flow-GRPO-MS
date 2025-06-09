@@ -214,8 +214,9 @@ class QwenVLOCRVLLMScorer(VLLMScorer):
 
     def __init__(self, base_url: Optional[str] = None) -> None:
         super().__init__()
-        self.base_url = os.environ.get("QWEN_VL_VLLM_URL", base_url)
-        self.model_path = os.environ.get("QWEN_VL_PATH", self._DEFAULT_MODEL)
+        self.base_url = os.environ.get("QWEN_VL_OCR_VLLM_URL", base_url)
+        self.model_path = os.environ.get("QWEN_VL_OCR_PATH",
+                                         self._DEFAULT_MODEL)
 
     def __call__(self, images: Union[List[Image.Image], np.ndarray, ms.Tensor],
                  prompts: List[str]) -> List[float]:

@@ -5,11 +5,14 @@ export PYTHONPATH="/home/mikecheung/gitlocal/mindone:$PYTHONPATH"
 
 # Model path
 export QWEN_VL_PATH="/home/mikecheung/model/Qwen2.5-VL-7B-Instruct"
+export QWEN_VL_OCR_PATH="/home/mikecheung/model/Qwen2.5-VL-7B-Instruct"
 export CLIP_PATH="/mnt/disk4/mikecheung/model/clip-vit-large-patch14"
 export PICKSCORE_PATH="/mnt/disk4/mikecheung/model/PickScore_v1"
 export UNIFIED_REWARD_PATH="/mnt/disk4/mikecheung/model/UnifiedReward-qwen-7b"
 
 # VLLM URl
+export QWEN_VL_VLLM_URL="http://0.0.0.0:9529/v1"
+export QWEN_VL_OCR_VLLM_URL="http://0.0.0.0:9529/v1"
 export UNIFIED_REWARD_VLLM_URL="http://0.0.0.0:9529/v1"
 
 export TOKENIZERS_PARALLELISM=False
