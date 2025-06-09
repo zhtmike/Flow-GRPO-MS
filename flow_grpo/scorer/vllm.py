@@ -16,24 +16,22 @@ from .scorer import Scorer
 
 class VLLMScorer(Scorer):
 
-    def __init__(self):
+    def __init__(self, base_url: Optional[str] = None):
         # following https://github.com/openai/openai-python/issues/1254
         # we should use a single event loop for AsyncOpenAI call
         self._loop = asyncio.new_event_loop()
+        self.aclient = AsyncOpenAI(base_url=base_url, api_key="EMPTY")
 
-    @staticmethod
-    async def async_process_queries(queries: List[str], model_path: str,
+    async def async_process_queries(self, queries: List[str], model_path: str,
                                     base_url: str) -> List[str]:
         results = await asyncio.gather(
-            *(VLLMScorer._async_query_openai(query, model_path, base_url)
+            *(self._async_query_openai(query, model_path, base_url)
               for query in queries))
         return results
 
-    @staticmethod
-    async def _async_query_openai(query: str, model_path: str,
+    async def _async_query_openai(self, query: str, model_path: str,
                                   base_url: str) -> str:
-        aclient = AsyncOpenAI(base_url=base_url, api_key="EMPTY")
-        completion = await aclient.chat.completions.create(
+        completion = await self.aclient.chat.completions.create(
             model=model_path,
             messages=[
                 {
@@ -73,9 +71,9 @@ class QwenVLVLLMScorer(VLLMScorer):
         "<Score>X</Score>")
 
     def __init__(self, base_url: Optional[str] = None) -> None:
-        super().__init__()
         self.base_url = os.environ.get("QWEN_VL_VLLM_URL", base_url)
         self.model_path = os.environ.get("QWEN_VL_PATH", self._DEFAULT_MODEL)
+        super().__init__(base_url=self.base_url)
 
     def __call__(self,
                  images: Union[List[Image.Image], np.ndarray, ms.Tensor],
@@ -146,10 +144,10 @@ class UnifiedRewardVLLMScorer(VLLMScorer):
         "Text Caption: [{prompt}]")
 
     def __init__(self, base_url: Optional[str] = None) -> None:
-        super().__init__()
         self.base_url = os.environ.get("UNIFIED_REWARD_VLLM_URL", base_url)
         self.model_path = os.environ.get("UNIFIED_REWARD_PATH",
                                          self._DEFAULT_MODEL)
+        super().__init__(base_url=self.base_url)
 
     def __call__(self, images: Union[List[Image.Image], np.ndarray, ms.Tensor],
                  prompts: List[str]) -> List[float]:
@@ -213,10 +211,10 @@ class QwenVLOCRVLLMScorer(VLLMScorer):
     _task = "Please output only the text content from the image without any additional descriptions or formatting."
 
     def __init__(self, base_url: Optional[str] = None) -> None:
-        super().__init__()
         self.base_url = os.environ.get("QWEN_VL_OCR_VLLM_URL", base_url)
         self.model_path = os.environ.get("QWEN_VL_OCR_PATH",
                                          self._DEFAULT_MODEL)
+        super().__init__(base_url=self.base_url)
 
     def __call__(self, images: Union[List[Image.Image], np.ndarray, ms.Tensor],
                  prompts: List[str]) -> List[float]:
