@@ -43,6 +43,7 @@ class VLLMScorer(Scorer):
                     "content": query,
                 },
             ],
+            max_completion_tokens=256,
             temperature=0,
         )
         return completion.choices[0].message.content
