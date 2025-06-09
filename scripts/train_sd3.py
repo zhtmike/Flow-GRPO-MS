@@ -373,8 +373,8 @@ def train(args: argparse.Namespace):
                           eps=args.adam_epsilon)
 
     # prepare prompt and reward fn
-    if args.reward in AVAILABLE_SCORERS:
-        scorers = {args.reward: 1.0}
+    scorers_weight = [1 / len(args.reward)] * len(args.reward)
+    scorers = dict(zip(args.reward, scorers_weight))
 
     reward_fn = MultiScorer(scorers)
 
@@ -767,9 +767,10 @@ def main():
     # =========== general arguments ===========
     group = parser.add_argument_group("general arguments")
     group.add_argument("--reward",
+                       nargs="+",
                        required=True,
                        choices=AVAILABLE_SCORERS.keys(),
-                       help="Reward function to use for training")
+                       help="Reward function(s) to use for training")
     group.add_argument("--resolution",
                        default=512,
                        type=int,
