@@ -11,6 +11,7 @@ class EMAModuleWrapper(nn.Cell):
         update_step_interval: int = 1,
     ):
         super().__init__()
+        self.parameters = parameters
         self.ema_parameters = parameters.clone("ema")
         self.temp_stored_parameters = None
         self.decay = decay
@@ -32,30 +33,25 @@ class EMAModuleWrapper(nn.Cell):
                     ema_parameter.add_(one_minus_decay *
                                        (parameter - ema_parameter))
 
-    def copy_ema_to(self,
-                    parameters: ms.ParameterTuple,
-                    store_temp: bool = True) -> None:
+    def copy_ema_to_model(self) -> None:
         """
-        Copy the EMA parameters to the provided parameters.
+        Copy the EMA parameters to the model parameters.
         """
-        if store_temp:
-            self.temp_stored_parameters = parameters.clone("tmp")
-
-        parameters = list(parameters)
+        self.temp_stored_parameters = self.parameters.clone("tmp")
         for ema_parameter, parameter in zip(self.ema_parameters,
-                                            parameters,
-                                            strict=True):
+                                            self.parameters):
             parameter.copy_(ema_parameter)
 
-    def copy_temp_to(self, parameters: ms.ParameterTuple) -> None:
+    def copy_temp_to_model(self) -> None:
         """
-        Copy the temporarily stored parameters back to the original parameters.
-        This is used to restore the original parameters after an EMA update.
+        Copy the temporary stored parameters back to the model parameters.
         """
-        assert self.temp_stored_parameters is not None
+        if self.temp_stored_parameters is None:
+            raise RuntimeError(
+                "No temporary parameters stored. Call copy_ema_to_model first."
+            )
         for temp_parameter, parameter in zip(self.temp_stored_parameters,
-                                             parameters,
-                                             strict=True):
+                                             self.parameters):
             parameter.copy_(temp_parameter)
 
         self.temp_stored_parameters = None

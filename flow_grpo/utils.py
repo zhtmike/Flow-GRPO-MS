@@ -1,6 +1,7 @@
+import itertools
 import os
 from functools import partial
-from typing import Tuple
+from typing import List, Tuple, Union
 
 import mindspore as ms
 import mindspore.mint as mint
@@ -24,16 +25,21 @@ def requires_grad_(cell: nn.Cell, requires_grad: bool = True) -> None:
         p.requires_grad = requires_grad
 
 
-def gather(x: ms.Tensor) -> ms.Tensor:
+def gather(x: Union[ms.Tensor, List[str]]) -> Union[ms.Tensor, List[str]]:
     """
-    Gather the tensor across all devices in the distributed environment.
+    Gather the tensor or list of str across all devices in the distributed environment.
     """
     size = dist.get_world_size()
     if size == 1:
         return x
 
-    output = mint.zeros((x.shape[0] * size, *x.shape[1:]), dtype=x.dtype)
-    dist.all_gather_into_tensor(output, x)
+    if isinstance(x, ms.Tensor):
+        output = mint.zeros((x.shape[0] * size, *x.shape[1:]), dtype=x.dtype)
+        dist.all_gather_into_tensor(output, x)
+    else:
+        output = [None] * size
+        dist.all_gather_object(output, x)
+        output = list(itertools.chain.from_iterable(output))
     return output
 
 
