@@ -35,9 +35,10 @@ class MultiScorer(Scorer):
             self.score_fn[score_name] = cls()
 
     def __call__(
-            self,
-            images: Union[List[Image.Image], np.ndarray, ms.Tensor],
-            prompts: Optional[List[str]] = None) -> Dict[str, List[float]]:
+        self,
+        images: Union[List[Image.Image], np.ndarray, ms.Tensor],
+        prompts: Optional[List[str]] = None,
+    ) -> Dict[str, List[float]]:
         score_details = dict()
         total_scores = list()
         for score_name, weight in self.scorers.items():
@@ -53,7 +54,7 @@ class MultiScorer(Scorer):
                     for total, weighted in zip(total_scores, weighted_scores)
                 ]
 
-        score_details['avg'] = total_scores
+        score_details["avg"] = total_scores
         return score_details
 
 

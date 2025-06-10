@@ -21,30 +21,41 @@ from flow_grpo.misc import init_debug_pipeline
 from flow_grpo.optim import BF16AdamW
 from flow_grpo.scorer import AVAILABLE_SCORERS, MultiScorer
 from flow_grpo.stat_tracking import PerPromptStatTracker
-from flow_grpo.trainer import (FlowMatchEulerSDEDiscreteScheduler, NetWithLoss,
-                               StableDiffusion3PipelineWithSDELogProb)
-from flow_grpo.utils import (clip_by_global_norm, gather, map_, requires_grad_,
-                             save_checkpoint, syn_gradients)
+from flow_grpo.trainer import (
+    FlowMatchEulerSDEDiscreteScheduler,
+    NetWithLoss,
+    StableDiffusion3PipelineWithSDELogProb,
+)
+from flow_grpo.utils import (
+    clip_by_global_norm,
+    gather,
+    map_,
+    requires_grad_,
+    save_checkpoint,
+    syn_gradients,
+)
 
 DEFAULT_MODEL = "stabilityai/stable-diffusion-3.5-medium"
 
 logger = get_logger()
 
 
-def evaluate(pipeline: StableDiffusion3PipelineWithSDELogProb,
-             reward_fn: MultiScorer,
-             test_iter: DictIterator,
-             sample_neg_prompt_embeds: ms.Tensor,
-             sample_neg_pooled_prompt_embeds: ms.Tensor,
-             scheduler: Optional[FlowMatchEulerDiscreteScheduler] = None,
-             outdir: str = "output",
-             ema: Optional[EMAModuleWrapper] = None,
-             total_num: Optional[int] = None,
-             eval_num_steps: int = 40,
-             guidance_scale: float = 1.0,
-             resolution: int = 512,
-             max_sequence_length: int = 128,
-             seed: int = 0) -> None:
+def evaluate(
+    pipeline: StableDiffusion3PipelineWithSDELogProb,
+    reward_fn: MultiScorer,
+    test_iter: DictIterator,
+    sample_neg_prompt_embeds: ms.Tensor,
+    sample_neg_pooled_prompt_embeds: ms.Tensor,
+    scheduler: Optional[FlowMatchEulerDiscreteScheduler] = None,
+    outdir: str = "output",
+    ema: Optional[EMAModuleWrapper] = None,
+    total_num: Optional[int] = None,
+    eval_num_steps: int = 40,
+    guidance_scale: float = 1.0,
+    resolution: int = 512,
+    max_sequence_length: int = 128,
+    seed: int = 0,
+) -> None:
     if ema:
         # copy the ema parameters to the model
         ema.copy_ema_to_model()
@@ -65,17 +76,17 @@ def evaluate(pipeline: StableDiffusion3PipelineWithSDELogProb,
 
     # generate the images with the same initials noise for each evaluation step
     generator = np.random.default_rng(seed)
-    for i, test_batch in tqdm(enumerate(test_iter),
-                              desc="Eval: ",
-                              total=total_num,
-                              dynamic_ncols=True):
+    for i, test_batch in tqdm(
+        enumerate(test_iter), desc="Eval: ", total=total_num, dynamic_ncols=True
+    ):
         prompts = test_batch["prompt"].tolist()
         prompt_embeds, _, pooled_prompt_embeds, _ = pipeline.encode_prompt(
             prompts,
             None,
             None,
             do_classifier_free_guidance=False,
-            max_sequence_length=max_sequence_length)
+            max_sequence_length=max_sequence_length,
+        )
 
         output = pipeline(
             prompt_embeds=prompt_embeds,
@@ -88,7 +99,8 @@ def evaluate(pipeline: StableDiffusion3PipelineWithSDELogProb,
             return_dict=True,
             height=resolution,
             width=resolution,
-            generator=generator)
+            generator=generator,
+        )
 
         # save the image for visualization
         for j, (prompt, image) in enumerate(zip(prompts, output.images)):
@@ -149,14 +161,17 @@ def train(args: argparse.Namespace):
     else:
         with nn.no_init_parameters():
             pipeline = StableDiffusion3PipelineWithSDELogProb.from_pretrained(
-                args.model)
+                args.model
+            )
 
     # replace scheduler with FlowMatchEulerSDEDiscreteScheduler
     original_scheduler = pipeline.scheduler
     scheduler_config = FlowMatchEulerSDEDiscreteScheduler.load_config(
-        args.model, subfolder="scheduler")
+        args.model, subfolder="scheduler"
+    )
     pipeline.scheduler = FlowMatchEulerSDEDiscreteScheduler.from_config(
-        scheduler_config)
+        scheduler_config
+    )
 
     # freeze parameters of models to save more memory
     requires_grad_(pipeline.vae, False)
@@ -211,28 +226,40 @@ def train(args: argparse.Namespace):
         )
         if args.lora_path:
             pipeline.transformer = PeftModel.from_pretrained(
-                pipeline.transformer, args.lora_path)
+                pipeline.transformer, args.lora_path
+            )
             pipeline.transformer.set_adapter("default")
         else:
-            pipeline.transformer = get_peft_model(pipeline.transformer,
-                                                  transformer_lora_config)
+            pipeline.transformer = get_peft_model(
+                pipeline.transformer, transformer_lora_config
+            )
     pipeline.transformer.to(inference_dtype)
 
     trainable_parameters = ms.ParameterTuple(
-        filter(lambda p: p.requires_grad,
-               pipeline.transformer.get_parameters()))
+        filter(lambda p: p.requires_grad, pipeline.transformer.get_parameters())
+    )
 
     # print model size
     transformer_params = sum(
-        [param.size for param in pipeline.transformer.get_parameters()])
+        [param.size for param in pipeline.transformer.get_parameters()]
+    )
     vae_params = sum([param.size for param in pipeline.vae.get_parameters()])
     text_encoder_params = sum(
-        [param.size for param in pipeline.text_encoder.get_parameters()])
+        [param.size for param in pipeline.text_encoder.get_parameters()]
+    )
     text_encoder_2_params = sum(
-        [param.size for param in pipeline.text_encoder_2.get_parameters()])
+        [param.size for param in pipeline.text_encoder_2.get_parameters()]
+    )
     text_encoder_3_params = sum(
-        [param.size for param in pipeline.text_encoder_3.get_parameters()])
-    total_params = transformer_params + vae_params + text_encoder_params + text_encoder_2_params + text_encoder_3_params
+        [param.size for param in pipeline.text_encoder_3.get_parameters()]
+    )
+    total_params = (
+        transformer_params
+        + vae_params
+        + text_encoder_params
+        + text_encoder_2_params
+        + text_encoder_3_params
+    )
     trainable_params = sum([param.size for param in trainable_parameters])
 
     logger.info(
@@ -241,17 +268,17 @@ def train(args: argparse.Namespace):
     logger.info(f"Total num. of trainable parameters: {trainable_params:,}")
 
     if args.ema:
-        ema = EMAModuleWrapper(trainable_parameters,
-                               decay=0.9,
-                               update_step_interval=1)
+        ema = EMAModuleWrapper(trainable_parameters, decay=0.9, update_step_interval=1)
     else:
         ema = None
 
-    optimizer = BF16AdamW(trainable_parameters,
-                          lr=args.learning_rate,
-                          betas=(args.adam_beta1, args.adam_beta2),
-                          weight_decay=args.adam_weight_decay,
-                          eps=args.adam_epsilon)
+    optimizer = BF16AdamW(
+        trainable_parameters,
+        lr=args.learning_rate,
+        betas=(args.adam_beta1, args.adam_beta2),
+        weight_decay=args.adam_weight_decay,
+        eps=args.adam_epsilon,
+    )
 
     # prepare prompt and reward fn
     scorers_weight = [1 / len(args.reward)] * len(args.reward)
@@ -260,30 +287,30 @@ def train(args: argparse.Namespace):
 
     reward_fn = MultiScorer(scorers)
 
-    train_dataset = TextPromptDataset(args.dataset, 'train')
-    test_dataset = TextPromptDataset(args.dataset,
-                                     'test',
-                                     max_num=args.validation_num)
-    train_sampler = DistributedKRepeatSampler(batch_size=args.train_batch_size,
-                                              k=args.num_image_per_prompt,
-                                              num_shards=num_processes,
-                                              shard_id=process_index,
-                                              num_iters=args.num_epochs *
-                                              args.num_batches_per_epoch)
+    train_dataset = TextPromptDataset(args.dataset, "train")
+    test_dataset = TextPromptDataset(args.dataset, "test", max_num=args.validation_num)
+    train_sampler = DistributedKRepeatSampler(
+        batch_size=args.train_batch_size,
+        k=args.num_image_per_prompt,
+        num_shards=num_processes,
+        shard_id=process_index,
+        num_iters=args.num_epochs * args.num_batches_per_epoch,
+    )
 
     # create dataloader
-    train_dataloader = GeneratorDataset(train_dataset,
-                                        column_names="prompt",
-                                        batch_sampler=train_sampler,
-                                        num_parallel_workers=1)
+    train_dataloader = GeneratorDataset(
+        train_dataset,
+        column_names="prompt",
+        batch_sampler=train_sampler,
+        num_parallel_workers=1,
+    )
 
-    test_dataloader = GeneratorDataset(test_dataset,
-                                       column_names="prompt",
-                                       num_parallel_workers=1,
-                                       shuffle=False)
-    test_dataloader = test_dataloader.batch(args.test_batch_size,
-                                            num_parallel_workers=1,
-                                            drop_remainder=False)
+    test_dataloader = GeneratorDataset(
+        test_dataset, column_names="prompt", num_parallel_workers=1, shuffle=False
+    )
+    test_dataloader = test_dataloader.batch(
+        args.test_batch_size, num_parallel_workers=1, drop_remainder=False
+    )
 
     # compute the native prompt embeddings first to save computation time
     neg_prompt_embed, _, neg_pooled_prompt_embed, _ = pipeline.encode_prompt(
@@ -291,16 +318,17 @@ def train(args: argparse.Namespace):
         None,
         None,
         do_classifier_free_guidance=False,
-        max_sequence_length=args.max_sequence_length)
+        max_sequence_length=args.max_sequence_length,
+    )
 
-    sample_neg_prompt_embeds = neg_prompt_embed.repeat(args.train_batch_size,
-                                                       1, 1)
-    train_neg_prompt_embeds = neg_prompt_embed.repeat(args.train_batch_size, 1,
-                                                      1)
+    sample_neg_prompt_embeds = neg_prompt_embed.repeat(args.train_batch_size, 1, 1)
+    train_neg_prompt_embeds = neg_prompt_embed.repeat(args.train_batch_size, 1, 1)
     sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(
-        args.train_batch_size, 1)
+        args.train_batch_size, 1
+    )
     train_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(
-        args.train_batch_size, 1)
+        args.train_batch_size, 1
+    )
 
     if args.num_image_per_prompt == 1 and args.per_prompt_stat_tracking:
         logger.warning(
@@ -315,15 +343,16 @@ def train(args: argparse.Namespace):
         stat_tracker = PerPromptStatTracker(args.global_std)
 
     # Train!
-    samples_per_epoch = (args.train_batch_size * num_processes *
-                         args.num_batches_per_epoch)
-    total_train_batch_size = (args.train_batch_size * num_processes *
-                              args.gradient_accumulation_steps)
+    samples_per_epoch = (
+        args.train_batch_size * num_processes * args.num_batches_per_epoch
+    )
+    total_train_batch_size = (
+        args.train_batch_size * num_processes * args.gradient_accumulation_steps
+    )
 
     logger.info(f"Num Epochs = {args.num_epochs}")
     logger.info(f"Train batch size per device = {args.train_batch_size}")
-    logger.info(
-        f"Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+    logger.info(f"Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"Total number of samples per epoch = {samples_per_epoch}")
     logger.info(
         f"Total train batch size (w. parallel, distributed & accumulation) = {total_train_batch_size}"
@@ -342,14 +371,16 @@ def train(args: argparse.Namespace):
     train_iter = train_dataloader.create_dict_iterator(output_numpy=True)
     test_iter = test_dataloader.create_dict_iterator(output_numpy=True)
 
-    net_with_loss = NetWithLoss(pipeline,
-                                guidance_scale=args.guidance_scale,
-                                adv_clip_max=args.adv_clip_max,
-                                beta=args.beta,
-                                clip_range=args.clip_range)
-    loss_and_grad_fn = ms.value_and_grad(net_with_loss,
-                                         grad_position=None,
-                                         weights=optimizer.parameters)
+    net_with_loss = NetWithLoss(
+        pipeline,
+        guidance_scale=args.guidance_scale,
+        adv_clip_max=args.adv_clip_max,
+        beta=args.beta,
+        clip_range=args.clip_range,
+    )
+    loss_and_grad_fn = ms.value_and_grad(
+        net_with_loss, grad_position=None, weights=optimizer.parameters
+    )
 
     # we always accumulate gradients across timesteps; we want args.gradient_accumulation_steps to be the
     # number of *samples* we accumulate across, so we need to multiply by the number of training timesteps to get
@@ -359,33 +390,38 @@ def train(args: argparse.Namespace):
     for epoch in range(first_epoch, args.num_epochs):
         if epoch % args.eval_freq == 0 and is_main_process:
             outdir = os.path.join(output_dir, "visual", f"epoch_{epoch}")
-            evaluate(pipeline,
-                     reward_fn,
-                     test_iter,
-                     sample_neg_prompt_embeds,
-                     sample_neg_pooled_prompt_embeds,
-                     scheduler=original_scheduler,
-                     outdir=outdir,
-                     ema=ema,
-                     total_num=len(test_dataloader),
-                     eval_num_steps=args.eval_num_steps,
-                     guidance_scale=args.guidance_scale,
-                     resolution=args.resolution,
-                     max_sequence_length=args.max_sequence_length,
-                     seed=args.seed)
+            evaluate(
+                pipeline,
+                reward_fn,
+                test_iter,
+                sample_neg_prompt_embeds,
+                sample_neg_pooled_prompt_embeds,
+                scheduler=original_scheduler,
+                outdir=outdir,
+                ema=ema,
+                total_num=len(test_dataloader),
+                eval_num_steps=args.eval_num_steps,
+                guidance_scale=args.guidance_scale,
+                resolution=args.resolution,
+                max_sequence_length=args.max_sequence_length,
+                seed=args.seed,
+            )
         if epoch % args.save_freq == 0 and epoch > 0 and is_main_process:
-            save_checkpoint(trainable_parameters,
-                            outdir=os.path.join(output_dir, "ckpt"))
+            save_checkpoint(
+                trainable_parameters, outdir=os.path.join(output_dir, "ckpt")
+            )
         dist.barrier()
 
         #################### SAMPLING ####################
         pipeline.transformer.set_train(False)
         samples = []
-        for i in trange(args.num_batches_per_epoch,
-                        desc=f"Epoch {epoch}: sampling",
-                        disable=not is_main_process,
-                        dynamic_ncols=True,
-                        position=0):
+        for i in trange(
+            args.num_batches_per_epoch,
+            desc=f"Epoch {epoch}: sampling",
+            disable=not is_main_process,
+            dynamic_ncols=True,
+            position=0,
+        ):
             prompts = next(train_iter)["prompt"].tolist()
 
             prompt_embeds, _, pooled_prompt_embeds, _ = pipeline.encode_prompt(
@@ -393,7 +429,8 @@ def train(args: argparse.Namespace):
                 None,
                 None,
                 do_classifier_free_guidance=False,
-                max_sequence_length=args.max_sequence_length)
+                max_sequence_length=args.max_sequence_length,
+            )
 
             output = pipeline(
                 prompt_embeds=prompt_embeds,
@@ -405,7 +442,8 @@ def train(args: argparse.Namespace):
                 output_type="pil",
                 return_dict=True,
                 height=args.resolution,
-                width=args.resolution)
+                width=args.resolution,
+            )
 
             # (batch_size, num_steps + 1, 16, 96, 96)
             latents = mint.stack(output.all_latents, dim=1).numpy()
@@ -414,38 +452,41 @@ def train(args: argparse.Namespace):
             log_probs = mint.stack(output.all_log_probs, dim=1).numpy()
 
             # (batch_size, num_steps)
-            timesteps = mint.tile(pipeline.scheduler.timesteps,
-                                  (args.train_batch_size, 1)).numpy()
+            timesteps = mint.tile(
+                pipeline.scheduler.timesteps, (args.train_batch_size, 1)
+            ).numpy()
 
             # compute rewards asynchronously
             rewards = reward_fn(output.images, prompts)
 
-            samples.append({
-                "prompts": prompts,
-                "prompt_embeds": prompt_embeds.numpy(),
-                "pooled_prompt_embeds": pooled_prompt_embeds.numpy(),
-                "timesteps": timesteps,
-                "latents": latents[:, :-1],
-                "next_latents": latents[:, 1:],
-                "log_probs": log_probs,
-                "rewards": rewards,
-            })
+            samples.append(
+                {
+                    "prompts": prompts,
+                    "prompt_embeds": prompt_embeds.numpy(),
+                    "pooled_prompt_embeds": pooled_prompt_embeds.numpy(),
+                    "timesteps": timesteps,
+                    "latents": latents[:, :-1],
+                    "next_latents": latents[:, 1:],
+                    "log_probs": log_probs,
+                    "rewards": rewards,
+                }
+            )
 
         # collate samples into dict where each entry has shape (num_batches_per_epoch * sample.batch_size, ...)
         samples = {
-            k: np.concatenate([s[k] for s in samples], axis=0)
-            if not isinstance(samples[0][k], dict) else {
-                sub_key: np.concatenate([s[k][sub_key] for s in samples],
-                                        axis=0)
-                for sub_key in samples[0][k]
-            }
+            k: (
+                np.concatenate([s[k] for s in samples], axis=0)
+                if not isinstance(samples[0][k], dict)
+                else {
+                    sub_key: np.concatenate([s[k][sub_key] for s in samples], axis=0)
+                    for sub_key in samples[0][k]
+                }
+            )
             for k in samples[0].keys()
         }
 
         reward_avg = samples["rewards"]["avg"][..., None]
-        samples["rewards"]["avg"] = np.repeat(reward_avg,
-                                              args.num_steps,
-                                              axis=1)
+        samples["rewards"]["avg"] = np.repeat(reward_avg, args.num_steps, axis=1)
 
         # gather rewards across processes
         gathered_rewards = {
@@ -457,22 +498,25 @@ def train(args: argparse.Namespace):
         if args.per_prompt_stat_tracking:
             # gather the prompts across processes
             prompts = gather(samples["prompts"].tolist())
-            advantages = stat_tracker.update(prompts, gathered_rewards['avg'])
-            if len(set(prompts)
-                   ) != samples_per_epoch // args.num_image_per_prompt:
-                logger.warning((
-                    f"Number of unique prompts {len(set(prompts))} does not equal "
-                    f"to the sammples per epoch {samples_per_epoch} / num_image_per_prompt {args.num_image_per_prompt}."
-                ))
+            advantages = stat_tracker.update(prompts, gathered_rewards["avg"])
+            if len(set(prompts)) != samples_per_epoch // args.num_image_per_prompt:
+                logger.warning(
+                    (
+                        f"Number of unique prompts {len(set(prompts))} does not equal "
+                        f"to the sammples per epoch {samples_per_epoch} / num_image_per_prompt {args.num_image_per_prompt}."
+                    )
+                )
             stat_tracker.clear()
         else:
-            advantages = (gathered_rewards['avg'] -
-                          gathered_rewards['avg'].mean()) / (
-                              gathered_rewards['avg'].std() + 1e-4)
+            advantages = (gathered_rewards["avg"] - gathered_rewards["avg"].mean()) / (
+                gathered_rewards["avg"].std() + 1e-4
+            )
 
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
+        advantages = advantages.astype(np.float32)
         samples["advantages"] = advantages.reshape(
-            num_processes, -1, advantages.shape[-1])[process_index]
+            num_processes, -1, advantages.shape[-1]
+        )[process_index]
 
         del samples["rewards"]
 
@@ -487,30 +531,34 @@ def train(args: argparse.Namespace):
             false_indices = np.where(~mask)[0]
             num_to_change = num_batches - (true_count % num_batches)
             if len(false_indices) >= num_to_change:
-                random_indices = np.random.permutation(
-                    len(false_indices))[:num_to_change]
+                random_indices = np.random.permutation(len(false_indices))[
+                    :num_to_change
+                ]
                 mask[false_indices[random_indices]] = True
 
         # Filter out samples where the entire time dimension of advantages is zero
         samples = {k: v[mask] for k, v in samples.items()}
 
         if samples["advantages"].size == 0:
-            logger.warning(
-                "No samples left after filtering. Skipping this epoch.")
+            logger.warning("No samples left after filtering. Skipping this epoch.")
             continue
 
         total_batch_size, num_timesteps = samples["timesteps"].shape
         assert num_timesteps == args.num_steps
 
-        logger.debug({
-            "global_step": global_step,
-            "epoch": epoch,
-            **{
-                f"reward_{key}": value.mean().item()
-                for key, value in gathered_rewards.items() if '_strict_accuracy' not in key and '_accuracy' not in key
-            }, "advantages": np.abs(samples["advantages"]).mean().item(),
-            "actual_batch_size": mask.sum().item() // num_batches
-        })
+        logger.debug(
+            {
+                "global_step": global_step,
+                "epoch": epoch,
+                **{
+                    f"reward_{key}": value.mean().item()
+                    for key, value in gathered_rewards.items()
+                    if "_strict_accuracy" not in key and "_accuracy" not in key
+                },
+                "advantages": np.abs(samples["advantages"]).mean().item(),
+                "actual_batch_size": mask.sum().item() // num_batches,
+            }
+        )
 
         #################### TRAINING ####################
         for inner_epoch in range(args.num_inner_epochs):
@@ -520,16 +568,15 @@ def train(args: argparse.Namespace):
 
             # rebatch for training
             samples_batched = {
-                k:
-                v.reshape(-1, total_batch_size // args.num_batches_per_epoch,
-                          *v.shape[1:])
+                k: v.reshape(
+                    -1, total_batch_size // args.num_batches_per_epoch, *v.shape[1:]
+                )
                 for k, v in samples.items()
             }
 
             # dict of lists -> list of dicts for easier iteration
             samples_batched = [
-                dict(zip(samples_batched, x))
-                for x in zip(*samples_batched.values())
+                dict(zip(samples_batched, x)) for x in zip(*samples_batched.values())
             ]
 
             # train
@@ -543,33 +590,35 @@ def train(args: argparse.Namespace):
                 loss_scaler = None
 
             for i, sample in tqdm(
-                    list(enumerate(samples_batched)),
-                    desc=f"Epoch {epoch}.{inner_epoch}: training",
-                    disable=not is_main_process,
-                    dynamic_ncols=True,
-                    position=0):
+                list(enumerate(samples_batched)),
+                desc=f"Epoch {epoch}.{inner_epoch}: training",
+                disable=not is_main_process,
+                dynamic_ncols=True,
+                position=0,
+            ):
                 if args.guidance_scale > 1.0:
                     # concat negative prompts to sample prompts to avoid two forward passes
-                    embeds = mint.cat([
-                        train_neg_prompt_embeds,
-                        ms.tensor(sample["prompt_embeds"])
-                    ])
-                    pooled_embeds = mint.cat([
-                        train_neg_pooled_prompt_embeds,
-                        ms.tensor(sample["pooled_prompt_embeds"])
-                    ])
+                    embeds = mint.cat(
+                        [train_neg_prompt_embeds, ms.tensor(sample["prompt_embeds"])]
+                    )
+                    pooled_embeds = mint.cat(
+                        [
+                            train_neg_pooled_prompt_embeds,
+                            ms.tensor(sample["pooled_prompt_embeds"]),
+                        ]
+                    )
                 else:
                     embeds = ms.tensor(sample["prompt_embeds"])
                     pooled_embeds = ms.tensor(sample["pooled_prompt_embeds"])
 
                 avg_loss = list()
                 for j in tqdm(
-                        train_timesteps,
-                        desc="Timestep",
-                        leave=False,
-                        disable=not is_main_process,
-                        dynamic_ncols=True,
-                        position=1,
+                    train_timesteps,
+                    desc="Timestep",
+                    leave=False,
+                    disable=not is_main_process,
+                    dynamic_ncols=True,
+                    position=1,
                 ):
                     latents = ms.tensor(sample["latents"][:, j])
                     next_latents = ms.tensor(sample["next_latents"][:, j])
@@ -578,19 +627,24 @@ def train(args: argparse.Namespace):
                     sample_log_probs = ms.tensor(sample["log_probs"][:, j])
 
                     step_index = [
-                        pipeline.scheduler.index_for_timestep(t)
-                        for t in timesteps
+                        pipeline.scheduler.index_for_timestep(t) for t in timesteps
                     ]
                     next_step_index = [step + 1 for step in step_index]
-                    sigma = pipeline.scheduler.sigmas[step_index].view(
-                        -1, 1, 1, 1)
-                    sigma_next = pipeline.scheduler.sigmas[
-                        next_step_index].view(-1, 1, 1, 1)
+                    sigma = pipeline.scheduler.sigmas[step_index].view(-1, 1, 1, 1)
+                    sigma_next = pipeline.scheduler.sigmas[next_step_index].view(
+                        -1, 1, 1, 1
+                    )
 
                     with pipeline.transformer.disable_adapter():
                         _, prev_sample_mean_ref, _ = net_with_loss.compute_log_prob(
-                            latents, next_latents, timesteps, embeds,
-                            pooled_embeds, sigma, sigma_next)
+                            latents,
+                            next_latents,
+                            timesteps,
+                            embeds,
+                            pooled_embeds,
+                            sigma,
+                            sigma_next,
+                        )
 
                     loss, grad = loss_and_grad_fn(
                         latents,
@@ -603,32 +657,36 @@ def train(args: argparse.Namespace):
                         sigma,
                         sigma_next,
                         prev_sample_mean_ref=prev_sample_mean_ref,
-                        loss_scaler=loss_scaler)
+                        loss_scaler=loss_scaler,
+                    )
 
-                    if (i * num_train_timesteps +
-                            j) % gradient_accumulation_steps == 0:
+                    if (i * num_train_timesteps + j) % gradient_accumulation_steps == 0:
                         grad_accumulated = grad
                         logger.debug("Accumuated Gradient is reinitialized.")
                     else:
                         map_(lambda x, y: x.add_(y), grad_accumulated, grad)
                         logger.debug("Accumuated Gradient is updated.")
 
-                    if (i * num_train_timesteps + j +
-                            1) % gradient_accumulation_steps == 0:
+                    if (
+                        i * num_train_timesteps + j + 1
+                    ) % gradient_accumulation_steps == 0:
                         syn_gradients(grad_accumulated)
-                        clip_by_global_norm(grad_accumulated,
-                                            max_norm=args.max_grad_norm)
+                        clip_by_global_norm(
+                            grad_accumulated, max_norm=args.max_grad_norm
+                        )
                         optimizer(grad_accumulated)
                         logger.debug("Parameters are updated.")
 
                     avg_loss.append(loss.item())
                     global_step += 1
 
-                logger.debug({
-                    "global_step": global_step,
-                    "epoch": epoch,
-                    "loss": np.mean(avg_loss).item()
-                })
+                logger.debug(
+                    {
+                        "global_step": global_step,
+                        "epoch": epoch,
+                        "loss": np.mean(avg_loss).item(),
+                    }
+                )
 
                 if args.ema:
                     ema(trainable_parameters, global_step)
@@ -637,181 +695,210 @@ def train(args: argparse.Namespace):
 def main():
     parser = argparse.ArgumentParser(
         usage="Training SD3 with GRPO",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
 
     # =========== general arguments ===========
     group = parser.add_argument_group("general arguments")
-    group.add_argument("--reward",
-                       nargs="+",
-                       required=True,
-                       choices=AVAILABLE_SCORERS.keys(),
-                       help="Reward function(s) to use for training")
-    group.add_argument("--resolution",
-                       default=512,
-                       type=int,
-                       help="Image resolution for training and sampling")
-    group.add_argument("--max-sequence-length",
-                       default=128,
-                       type=int,
-                       help="Maximum sequence length for text prompts")
-    group.add_argument("--model",
-                       default=DEFAULT_MODEL,
-                       type=str,
-                       help="Path to the pretrained model")
+    group.add_argument(
+        "--reward",
+        nargs="+",
+        required=True,
+        choices=AVAILABLE_SCORERS.keys(),
+        help="Reward function(s) to use for training",
+    )
+    group.add_argument(
+        "--resolution",
+        default=512,
+        type=int,
+        help="Image resolution for training and sampling",
+    )
+    group.add_argument(
+        "--max-sequence-length",
+        default=128,
+        type=int,
+        help="Maximum sequence length for text prompts",
+    )
+    group.add_argument(
+        "--model", default=DEFAULT_MODEL, type=str, help="Path to the pretrained model"
+    )
     group.add_argument(
         "--run-name",
         type=str,
-        help="Name of the run for logging and saving checkpoints")
-    group.add_argument("--resume-from",
-                       type=str,
-                       help="Path to the checkpoint to resume from")
-    group.add_argument("--seed",
-                       type=int,
-                       default=42,
-                       help="Random seed for reproducibility")
+        help="Name of the run for logging and saving checkpoints",
+    )
+    group.add_argument(
+        "--resume-from", type=str, help="Path to the checkpoint to resume from"
+    )
+    group.add_argument(
+        "--seed", type=int, default=42, help="Random seed for reproducibility"
+    )
     group.add_argument(
         "--debug",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Whether to run in debug mode with a single layer network")
+        help="Whether to run in debug mode with a single layer network",
+    )
 
     # ========== training arguments ===========
     group = parser.add_argument_group("training arguments")
     group.add_argument(
-        '--num-steps',
+        "--num-steps",
         type=int,
         default=10,
-        help=
-        "Number of steps to sample from the diffusion model during training stage"
+        help="Number of steps to sample from the diffusion model during training stage",
     )
-    group.add_argument("--timestep-fraction",
-                       type=float,
-                       default=1.0,
-                       help="Fraction of timesteps to use for training")
-    group.add_argument("--mixed-precision",
-                       type=str,
-                       default="bf16",
-                       choices=["fp16", "bf16", "fp32"],
-                       help="Mixed precision to use for training")
-    group.add_argument("--learning-rate",
-                       type=float,
-                       default=3e-4,
-                       help="Learning rate for the optimizer")
-    group.add_argument("--adam-beta1",
-                       type=float,
-                       default=0.9,
-                       help="Beta1 for Adam optimizer")
-    group.add_argument("--adam-beta2",
-                       type=float,
-                       default=0.999,
-                       help="Beta2 for Adam optimizer")
-    group.add_argument("--adam-weight-decay",
-                       type=float,
-                       default=1e-4,
-                       help="Weight decay for Adam optimizer")
-    group.add_argument("--adam-epsilon",
-                       type=float,
-                       default=1e-8,
-                       help="Epsilon for Adam optimizer")
-    group.add_argument("--max-grad-norm",
-                       type=float,
-                       default=1.0,
-                       help="Maximum gradient norm for clipping")
-    group.add_argument('--num-epochs',
-                       type=int,
-                       default=1000,
-                       help="Number of epochs to train for")
-    group.add_argument("--num-inner-epochs",
-                       type=int,
-                       default=1,
-                       help="Number of inner epochs to train for")
-    group.add_argument("--train-batch-size",
-                       type=int,
-                       default=6,
-                       help="Batch size for training")
-    group.add_argument("--num-batches-per-epoch",
-                       type=int,
-                       default=12,
-                       help="Number of batches per epoch")
-    group.add_argument("--num-image-per-prompt",
-                       type=int,
-                       default=6,
-                       help="Number of images to generate per prompt")
-    group.add_argument("--gradient-accumulation-steps",
-                       type=int,
-                       default=6,
-                       help="Number of gradient accumulation steps")
-    group.add_argument("--save-freq",
-                       type=int,
-                       default=2,
-                       help="Frequency of saving checkpoints during training")
-    group.add_argument("--beta",
-                       type=float,
-                       default=0.001,
-                       help="KL reward coefficient for training")
-    group.add_argument("--adv-clip-max",
-                       type=float,
-                       default=5.0,
-                       help="Maximum value for the advantage clipping")
-    group.add_argument("--clip-range",
-                       type=float,
-                       default=1e-4,
-                       help="Clip range for the policy loss")
-    group.add_argument("--use-lora",
-                       action=argparse.BooleanOptionalAction,
-                       default=True,
-                       help="Whether to use LoRA for training")
-    group.add_argument("--lora-path",
-                       type=str,
-                       default=None,
-                       help="Path to the LoRA weights to load")
+    group.add_argument(
+        "--timestep-fraction",
+        type=float,
+        default=1.0,
+        help="Fraction of timesteps to use for training",
+    )
+    group.add_argument(
+        "--mixed-precision",
+        type=str,
+        default="bf16",
+        choices=["fp16", "bf16", "fp32"],
+        help="Mixed precision to use for training",
+    )
+    group.add_argument(
+        "--learning-rate",
+        type=float,
+        default=3e-4,
+        help="Learning rate for the optimizer",
+    )
+    group.add_argument(
+        "--adam-beta1", type=float, default=0.9, help="Beta1 for Adam optimizer"
+    )
+    group.add_argument(
+        "--adam-beta2", type=float, default=0.999, help="Beta2 for Adam optimizer"
+    )
+    group.add_argument(
+        "--adam-weight-decay",
+        type=float,
+        default=1e-4,
+        help="Weight decay for Adam optimizer",
+    )
+    group.add_argument(
+        "--adam-epsilon", type=float, default=1e-8, help="Epsilon for Adam optimizer"
+    )
+    group.add_argument(
+        "--max-grad-norm",
+        type=float,
+        default=1.0,
+        help="Maximum gradient norm for clipping",
+    )
+    group.add_argument(
+        "--num-epochs", type=int, default=1000, help="Number of epochs to train for"
+    )
+    group.add_argument(
+        "--num-inner-epochs",
+        type=int,
+        default=1,
+        help="Number of inner epochs to train for",
+    )
+    group.add_argument(
+        "--train-batch-size", type=int, default=6, help="Batch size for training"
+    )
+    group.add_argument(
+        "--num-batches-per-epoch",
+        type=int,
+        default=12,
+        help="Number of batches per epoch",
+    )
+    group.add_argument(
+        "--num-image-per-prompt",
+        type=int,
+        default=6,
+        help="Number of images to generate per prompt",
+    )
+    group.add_argument(
+        "--gradient-accumulation-steps",
+        type=int,
+        default=6,
+        help="Number of gradient accumulation steps",
+    )
+    group.add_argument(
+        "--save-freq",
+        type=int,
+        default=2,
+        help="Frequency of saving checkpoints during training",
+    )
+    group.add_argument(
+        "--beta", type=float, default=0.001, help="KL reward coefficient for training"
+    )
+    group.add_argument(
+        "--adv-clip-max",
+        type=float,
+        default=5.0,
+        help="Maximum value for the advantage clipping",
+    )
+    group.add_argument(
+        "--clip-range", type=float, default=1e-4, help="Clip range for the policy loss"
+    )
+    group.add_argument(
+        "--use-lora",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use LoRA for training",
+    )
+    group.add_argument(
+        "--lora-path", type=str, default=None, help="Path to the LoRA weights to load"
+    )
     group.add_argument(
         "--per-prompt-stat-tracking",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Whether to track per-prompt statistics for rewards")
+        help="Whether to track per-prompt statistics for rewards",
+    )
     group.add_argument(
         "--global-std",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Whether to use global standard deviation for rewards")
+        help="Whether to use global standard deviation for rewards",
+    )
 
     # ========== sampling arguments ===========
     group = parser.add_argument_group("sampling arguments")
-    group.add_argument('--guidance-scale',
-                       type=float,
-                       default=4.5,
-                       help="Guidance scale for classifier-free guidance")
-    group.add_argument("--test-batch-size",
-                       type=int,
-                       default=6,
-                       help="Batch size for evaluation")
-    group.add_argument("--eval-freq",
-                       type=int,
-                       default=2,
-                       help="Frequency of evaluation during training")
+    group.add_argument(
+        "--guidance-scale",
+        type=float,
+        default=4.5,
+        help="Guidance scale for classifier-free guidance",
+    )
+    group.add_argument(
+        "--test-batch-size", type=int, default=6, help="Batch size for evaluation"
+    )
+    group.add_argument(
+        "--eval-freq",
+        type=int,
+        default=2,
+        help="Frequency of evaluation during training",
+    )
     group.add_argument(
         "--eval-num-steps",
         type=int,
         default=40,
-        help=
-        "Number of steps to sample from the diffusion model during evaluation")
+        help="Number of steps to sample from the diffusion model during evaluation",
+    )
     group.add_argument(
         "--validation-num",
         type=int,
         default=12,
-        help="Number of validation samples to generate during evaluation")
-    group.add_argument("--ema",
-                       action=argparse.BooleanOptionalAction,
-                       default=True,
-                       help="Whether to use EMA for training")
+        help="Number of validation samples to generate during evaluation",
+    )
+    group.add_argument(
+        "--ema",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use EMA for training",
+    )
 
     # ========== dataset arguments ===========
     group = parser.add_argument_group("dataset arguments")
-    group.add_argument("--dataset",
-                       type=str,
-                       default="dataset/ocr",
-                       help="Path to the dataset")
+    group.add_argument(
+        "--dataset", type=str, default="dataset/ocr", help="Path to the dataset"
+    )
 
     args = parser.parse_args()
     train(args)

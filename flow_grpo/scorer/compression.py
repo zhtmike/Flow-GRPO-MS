@@ -13,9 +13,11 @@ class JpegCompressibilityScorer(Scorer):
     def __init__(self, max_size: int = 256) -> None:
         self.max_size = max_size
 
-    def __call__(self,
-                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
-                 prompts: Optional[List[str]] = None) -> List[float]:
+    def __call__(
+        self,
+        images: Union[List[Image.Image], np.ndarray, ms.Tensor],
+        prompts: Optional[List[str]] = None,
+    ) -> List[float]:
         if isinstance(images, (np.ndarray, ms.Tensor)):
             images = self.array_to_images(images)
 
@@ -34,9 +36,11 @@ class JpegImcompressibilityScorer(JpegCompressibilityScorer):
     def __init__(self, max_size: int = 256) -> None:
         super().__init__(max_size=max_size)
 
-    def __call__(self,
-                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
-                 prompts: Optional[List[str]] = None) -> List[float]:
+    def __call__(
+        self,
+        images: Union[List[Image.Image], np.ndarray, ms.Tensor],
+        prompts: Optional[List[str]] = None,
+    ) -> List[float]:
         rewards = super().__call__(images, prompts)
         rewards = [1 - r for r in rewards]
         return rewards

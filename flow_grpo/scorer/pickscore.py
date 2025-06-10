@@ -21,36 +21,42 @@ class PickScoreScorer(Scorer):
         self.processor = AutoProcessor.from_pretrained(model_path)
         with nn.no_init_parameters():
             self.model: CLIPModel = AutoModel.from_pretrained(
-                model_path, mindspore_dtype=dtype)
+                model_path, mindspore_dtype=dtype
+            )
 
-    def __call__(self,
-                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
-                 prompts: Optional[List[str]] = None) -> List[float]:
+    def __call__(
+        self,
+        images: Union[List[Image.Image], np.ndarray, ms.Tensor],
+        prompts: Optional[List[str]] = None,
+    ) -> List[float]:
         if isinstance(images, (np.ndarray, ms.Tensor)):
             images = self.array_to_images(images)
 
         # Preprocess images
-        image_inputs = self.processor(images=images,
-                                      padding=True,
-                                      truncation=True,
-                                      max_length=77,
-                                      return_tensors="np")
+        image_inputs = self.processor(
+            images=images,
+            padding=True,
+            truncation=True,
+            max_length=77,
+            return_tensors="np",
+        )
         for k, v in image_inputs.items():
             image_inputs[k] = ms.Tensor(v)
 
         # Preprocess text
-        text_inputs = self.processor(text=prompts,
-                                     padding=True,
-                                     truncation=True,
-                                     max_length=77,
-                                     return_tensors="np")
+        text_inputs = self.processor(
+            text=prompts,
+            padding=True,
+            truncation=True,
+            max_length=77,
+            return_tensors="np",
+        )
         for k, v in text_inputs.items():
             text_inputs[k] = ms.Tensor(v)
 
         # Get embeddings
         image_embs = self.model.get_image_features(**image_inputs)
-        image_embs = image_embs / mint.norm(
-            image_embs, p=2, dim=-1, keepdim=True)
+        image_embs = image_embs / mint.norm(image_embs, p=2, dim=-1, keepdim=True)
 
         text_embs = self.model.get_text_features(**text_inputs)
         text_embs = text_embs / mint.norm(text_embs, p=2, dim=-1, keepdim=True)

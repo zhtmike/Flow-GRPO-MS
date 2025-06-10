@@ -26,5 +26,5 @@ def _configure_root_logger() -> None:
     root_logger.addHandler(_default_handler)
     root_logger.setLevel(logging.INFO)
 
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     _default_handler.setFormatter(formatter)

@@ -7,7 +7,10 @@ import numpy as np
 import PIL.Image
 from mindone.diffusers.image_processor import PipelineImageInput
 from mindone.diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import (
-    StableDiffusion3Pipeline, calculate_shift, retrieve_timesteps)
+    StableDiffusion3Pipeline,
+    calculate_shift,
+    retrieve_timesteps,
+)
 from mindone.diffusers.utils import unscale_lora_layers
 from mindone.diffusers.utils.outputs import BaseOutput
 
@@ -44,8 +47,9 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
         negative_prompt_2: Optional[Union[str, List[str]]] = None,
         negative_prompt_3: Optional[Union[str, List[str]]] = None,
         num_images_per_prompt: Optional[int] = 1,
-        generator: Optional[Union[np.random.Generator,
-                                  List[np.random.Generator]]] = None,
+        generator: Optional[
+            Union[np.random.Generator, List[np.random.Generator]]
+        ] = None,
         latents: Optional[ms.Tensor] = None,
         prompt_embeds: Optional[ms.Tensor] = None,
         negative_prompt_embeds: Optional[ms.Tensor] = None,
@@ -57,8 +61,7 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
         return_dict: bool = False,
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
         clip_skip: Optional[int] = None,
-        callback_on_step_end: Optional[Callable[[int, int, Dict],
-                                                None]] = None,
+        callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 256,
         skip_guidance_layers: List[int] = None,
@@ -85,8 +88,7 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
             negative_prompt_embeds=negative_prompt_embeds,
             pooled_prompt_embeds=pooled_prompt_embeds,
             negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
-            callback_on_step_end_tensor_inputs=
-            callback_on_step_end_tensor_inputs,
+            callback_on_step_end_tensor_inputs=callback_on_step_end_tensor_inputs,
             max_sequence_length=max_sequence_length,
         )
 
@@ -106,8 +108,11 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
 
         # we're popping the `scale` instead of getting it because otherwise `scale` will be propagated
         # to the transformer and will raise RuntimeError.
-        lora_scale = self.joint_attention_kwargs.pop(
-            "scale", None) if self.joint_attention_kwargs is not None else None
+        lora_scale = (
+            self.joint_attention_kwargs.pop("scale", None)
+            if self.joint_attention_kwargs is not None
+            else None
+        )
 
         (
             prompt_embeds,
@@ -136,10 +141,10 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
             if skip_guidance_layers is not None:
                 original_prompt_embeds = prompt_embeds
                 original_pooled_prompt_embeds = pooled_prompt_embeds
-            prompt_embeds = mint.cat([negative_prompt_embeds, prompt_embeds],
-                                     dim=0)
+            prompt_embeds = mint.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             pooled_prompt_embeds = mint.cat(
-                [negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
+                [negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0
+            )
 
         # 4. Prepare latent variables
         num_channels_latents = self.transformer.config.in_channels
@@ -155,11 +160,11 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
 
         # 5. Prepare timesteps
         scheduler_kwargs = {}
-        if self.scheduler.config.get("use_dynamic_shifting",
-                                     None) and mu is None:
+        if self.scheduler.config.get("use_dynamic_shifting", None) and mu is None:
             _, _, height, width = latents.shape
             image_seq_len = (height // self.transformer.config.patch_size) * (
-                width // self.transformer.config.patch_size)
+                width // self.transformer.config.patch_size
+            )
             mu = calculate_shift(
                 image_seq_len,
                 self.scheduler.config.base_image_seq_len,
@@ -177,12 +182,14 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
             **scheduler_kwargs,
         )
         num_warmup_steps = max(
-            len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+            len(timesteps) - num_inference_steps * self.scheduler.order, 0
+        )
         self._num_timesteps = len(timesteps)
 
         # 6. Prepare image embeddings
-        if (ip_adapter_image is not None and self.is_ip_adapter_active
-            ) or ip_adapter_image_embeds is not None:
+        if (
+            ip_adapter_image is not None and self.is_ip_adapter_active
+        ) or ip_adapter_image_embeds is not None:
             ip_adapter_image_embeds = self.prepare_ip_adapter_image_embeds(
                 ip_adapter_image,
                 ip_adapter_image_embeds,
@@ -196,7 +203,8 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
                 }
             else:
                 self._joint_attention_kwargs.update(
-                    ip_adapter_image_embeds=ip_adapter_image_embeds)
+                    ip_adapter_image_embeds=ip_adapter_image_embeds
+                )
 
         all_latents = [latents]
         all_log_probs = []
@@ -208,11 +216,13 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
                     continue
 
                 # expand the latents if we are doing classifier free guidance
-                latent_model_input = mint.cat(
-                    [latents] *
-                    2) if self.do_classifier_free_guidance else latents
+                latent_model_input = (
+                    mint.cat([latents] * 2)
+                    if self.do_classifier_free_guidance
+                    else latents
+                )
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-                timestep = t.expand((latent_model_input.shape[0], ))
+                timestep = t.expand((latent_model_input.shape[0],))
 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -227,13 +237,16 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + self.guidance_scale * (
-                        noise_pred_text - noise_pred_uncond)
-                    should_skip_layers = (True if i > num_inference_steps *
-                                          skip_layer_guidance_start
-                                          and i < num_inference_steps *
-                                          skip_layer_guidance_stop else False)
+                        noise_pred_text - noise_pred_uncond
+                    )
+                    should_skip_layers = (
+                        True
+                        if i > num_inference_steps * skip_layer_guidance_start
+                        and i < num_inference_steps * skip_layer_guidance_stop
+                        else False
+                    )
                     if skip_guidance_layers is not None and should_skip_layers:
-                        timestep = t.expand((latents.shape[0], ))
+                        timestep = t.expand((latents.shape[0],))
                         latent_model_input = latents
                         noise_pred_skip_layers = self.transformer(
                             hidden_states=latent_model_input,
@@ -245,22 +258,22 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
                             skip_layers=skip_guidance_layers,
                         )[0]
                         noise_pred = (
-                            noise_pred +
-                            (noise_pred_text - noise_pred_skip_layers) *
-                            self._skip_layer_guidance_scale)
+                            noise_pred
+                            + (noise_pred_text - noise_pred_skip_layers)
+                            * self._skip_layer_guidance_scale
+                        )
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                output = self.scheduler.step(noise_pred,
-                                             t,
-                                             latents,
-                                             return_dict=True)
+                output = self.scheduler.step(noise_pred, t, latents, return_dict=True)
 
-                if isinstance(output,
-                              FlowMatchEulerSDEDiscreteSchedulerOutput):
-                    log_prob = compute_log_prob(output.prev_sample,
-                                                output.prev_sample_mean,
-                                                output.var_t, output.dt)
+                if isinstance(output, FlowMatchEulerSDEDiscreteSchedulerOutput):
+                    log_prob = compute_log_prob(
+                        output.prev_sample,
+                        output.prev_sample_mean,
+                        output.var_t,
+                        output.dt,
+                    )
                 else:
                     log_prob = None
 
@@ -275,22 +288,21 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
                     callback_kwargs = {}
                     for k in callback_on_step_end_tensor_inputs:
                         callback_kwargs[k] = locals()[k]
-                    callback_outputs = callback_on_step_end(
-                        self, i, t, callback_kwargs)
+                    callback_outputs = callback_on_step_end(self, i, t, callback_kwargs)
 
                     latents = callback_outputs.pop("latents", latents)
-                    prompt_embeds = callback_outputs.pop(
-                        "prompt_embeds", prompt_embeds)
+                    prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
                     negative_prompt_embeds = callback_outputs.pop(
-                        "negative_prompt_embeds", negative_prompt_embeds)
+                        "negative_prompt_embeds", negative_prompt_embeds
+                    )
                     negative_pooled_prompt_embeds = callback_outputs.pop(
-                        "negative_pooled_prompt_embeds",
-                        negative_pooled_prompt_embeds)
+                        "negative_pooled_prompt_embeds", negative_pooled_prompt_embeds
+                    )
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or (
-                    (i + 1) > num_warmup_steps and
-                    (i + 1) % self.scheduler.order == 0):
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
 
         if lora_scale is not None:
@@ -301,18 +313,19 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
             image = latents
 
         else:
-            latents = (latents / self.vae.config.scaling_factor
-                       ) + self.vae.config.shift_factor
+            latents = (
+                latents / self.vae.config.scaling_factor
+            ) + self.vae.config.shift_factor
             latents = latents.to(
                 self.vae.dtype
             )  # for validation in training where vae and transformer might have different dtype
 
             image = self.vae.decode(latents, return_dict=False)[0]
-            image = self.image_processor.postprocess(image,
-                                                     output_type=output_type)
+            image = self.image_processor.postprocess(image, output_type=output_type)
 
         if not return_dict:
             return (image, all_latents, all_log_probs)
 
         return StableDiffusionPipelineOutputeWithSDELogProb(
-            images=image, all_latents=all_latents, all_log_probs=all_log_probs)
+            images=image, all_latents=all_latents, all_log_probs=all_log_probs
+        )

@@ -55,18 +55,16 @@ def syn_gradients(gradients: Tuple[ms.Tensor, ...]) -> None:
     map_(lambda x: x.mul_(1 / size), gradients)
 
 
-def save_checkpoint(trainable_parameters: ms.ParameterTuple,
-                    outdir: str) -> None:
+def save_checkpoint(trainable_parameters: ms.ParameterTuple, outdir: str) -> None:
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
 
-    ms.save_checkpoint(list(trainable_parameters),
-                       os.path.join(outdir, "model.ckpt"))
+    ms.save_checkpoint(list(trainable_parameters), os.path.join(outdir, "model.ckpt"))
 
 
-def clip_by_global_norm(grads: Tuple[ms.Tensor, ...],
-                        max_norm: float,
-                        norm_type: float = 2.0) -> ms.Tensor:
+def clip_by_global_norm(
+    grads: Tuple[ms.Tensor, ...], max_norm: float, norm_type: float = 2.0
+) -> ms.Tensor:
     """
     Clips the gradients by global norm in place.
     Returns the total norm of the gradients.
@@ -76,15 +74,17 @@ def clip_by_global_norm(grads: Tuple[ms.Tensor, ...],
     return total_norm
 
 
-def _get_total_norm(tensors: Tuple[ms.Tensor, ...],
-                    norm_type: float = 2.0) -> ms.Tensor:
+def _get_total_norm(
+    tensors: Tuple[ms.Tensor, ...], norm_type: float = 2.0
+) -> ms.Tensor:
     norms = map_(partial(mint.linalg.vector_norm, ord=norm_type), tensors)
     total_norm = mint.linalg.vector_norm(mint.stack(norms), ord=norm_type)
     return total_norm
 
 
-def _clip_grads_with_norm_(grads: Tuple[ms.Tensor, ...], max_norm: float,
-                           total_norm: ms.Tensor) -> None:
+def _clip_grads_with_norm_(
+    grads: Tuple[ms.Tensor, ...], max_norm: float, total_norm: ms.Tensor
+) -> None:
     clip_coef = max_norm / (total_norm + 1e-6)
     clip_coef_clamped = mint.clamp(clip_coef, max=1.0)
     map_(lambda g: g.mul_(clip_coef_clamped), grads)

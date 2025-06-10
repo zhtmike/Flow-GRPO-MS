@@ -7,12 +7,11 @@ from mindspore.dataset import Sampler
 
 class TextPromptDataset:
 
-    def __init__(self,
-                 dataset: str,
-                 split: str = 'train',
-                 max_num: Optional[int] = None) -> None:
-        self.file_path = os.path.join(dataset, f'{split}.txt')
-        with open(self.file_path, 'r') as f:
+    def __init__(
+        self, dataset: str, split: str = "train", max_num: Optional[int] = None
+    ) -> None:
+        self.file_path = os.path.join(dataset, f"{split}.txt")
+        with open(self.file_path, "r") as f:
             self.prompts = [line.strip() for line in f.readlines()]
         if max_num is not None:
             self.prompts = self.prompts[:max_num]
@@ -26,12 +25,14 @@ class TextPromptDataset:
 
 class DistributedKRepeatSampler(Sampler):
 
-    def __init__(self,
-                 batch_size: int,
-                 k: int = 1,
-                 num_shards: Optional[int] = None,
-                 shard_id: Optional[int] = None,
-                 num_iters: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        batch_size: int,
+        k: int = 1,
+        num_shards: Optional[int] = None,
+        shard_id: Optional[int] = None,
+        num_iters: Optional[int] = None,
+    ) -> None:
         super().__init__()
         self.batch_size = batch_size
         self.k = k
@@ -47,9 +48,9 @@ class DistributedKRepeatSampler(Sampler):
     def __iter__(self):
         num_iters = self.num_iters if self.num_iters is not None else self.dataset_size
         for _ in range(num_iters):
-            sample_indices = np.random.choice(self.dataset_size,
-                                              self.sample_size,
-                                              replace=False)
+            sample_indices = np.random.choice(
+                self.dataset_size, self.sample_size, replace=False
+            )
             sample_indices = np.repeat(sample_indices, self.k)
             sample_indices = np.random.permutation(sample_indices)
 

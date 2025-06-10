@@ -29,7 +29,8 @@ class QwenVLScorer(Scorer):
         "<Thought>\n"
         "[Analyze the evaluation process in detail here]\n"
         "</Thought>\n"
-        "<Score>X</Score>")
+        "<Score>X</Score>"
+    )
 
     def __init__(self, dtype: ms.Type = ms.bfloat16) -> None:
         super().__init__()
@@ -41,39 +42,37 @@ class QwenVLScorer(Scorer):
                 attn_implementation="flash_attention_2",
             )
         self.processor: Qwen2VLProcessor = AutoProcessor.from_pretrained(
-            model_path, use_fast=False, padding_side="left")
+            model_path, use_fast=False, padding_side="left"
+        )
 
-    def __call__(self,
-                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
-                 prompts: Optional[List[str]] = None) -> List[float]:
+    def __call__(
+        self,
+        images: Union[List[Image.Image], np.ndarray, ms.Tensor],
+        prompts: Optional[List[str]] = None,
+    ) -> List[float]:
         if isinstance(images, (np.ndarray, ms.Tensor)):
             images = self.array_to_images(images)
 
         images_base64 = [self.pil_image_to_base64(image) for image in images]
         messages = []
         for base64_qwen in images_base64:
-            messages.append([
-                {
-                    "role":
-                    "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "image": base64_qwen
-                        },
-                        {
-                            "type": "text",
-                            "text": self._task
-                        },
-                    ],
-                },
-            ])
+            messages.append(
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": base64_qwen},
+                            {"type": "text", "text": self._task},
+                        ],
+                    },
+                ]
+            )
 
         # Preparation for batch inference
         texts = [
-            self.processor.apply_chat_template(msg,
-                                               tokenize=False,
-                                               add_generation_prompt=True)
+            self.processor.apply_chat_template(
+                msg, tokenize=False, add_generation_prompt=True
+            )
             for msg in messages
         ]
         image_inputs, video_inputs = process_vision_info(messages)
@@ -90,13 +89,14 @@ class QwenVLScorer(Scorer):
         # Batch Inference
         generated_ids = self.model.generate(**inputs, max_new_tokens=2048)
         generated_ids_trimmed = [
-            out_ids[len(in_ids):]
+            out_ids[len(in_ids) :]
             for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
         output_texts = self.processor.batch_decode(
             generated_ids_trimmed,
             skip_special_tokens=True,
-            clean_up_tokenization_spaces=False)
+            clean_up_tokenization_spaces=False,
+        )
         rewards = self.extract_scores(output_texts)
         return rewards
 
@@ -104,8 +104,7 @@ class QwenVLScorer(Scorer):
     def pil_image_to_base64(image: Image.Image) -> str:
         buffered = BytesIO()
         image.save(buffered, format="PNG")
-        encoded_image_text = base64.b64encode(
-            buffered.getvalue()).decode("utf-8")
+        encoded_image_text = base64.b64encode(buffered.getvalue()).decode("utf-8")
         base64_qwen = f"data:image;base64,{encoded_image_text}"
         return base64_qwen
 
@@ -113,7 +112,7 @@ class QwenVLScorer(Scorer):
     def extract_scores(output_text: List[str]) -> List[float]:
         scores = []
         for text in output_text:
-            match = re.search(r'<Score>(\d+)</Score>', text)
+            match = re.search(r"<Score>(\d+)</Score>", text)
             if match:
                 scores.append(float(match.group(1)) / 5)
             else:

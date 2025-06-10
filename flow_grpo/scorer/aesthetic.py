@@ -23,14 +23,14 @@ class AestheticScorer(Scorer):
         model_path = os.environ.get("CLIP_PATH", self._DEFAULT_MODEL)
         self.processor = CLIPProcessor.from_pretrained(model_path)
         with nn.no_init_parameters():
-            self.clip = CLIPModel.from_pretrained(model_path,
-                                                  mindspore_dtype=dtype)
+            self.clip = CLIPModel.from_pretrained(model_path, mindspore_dtype=dtype)
             self.mlp = MLP(dtype=dtype)
         self.dtype = dtype
 
         pth_path = hf_hub_download(
             repo_id="camenduru/improved-aesthetic-predictor",
-            filename="sac+logos+ava1-l14-linearMSE.pth")
+            filename="sac+logos+ava1-l14-linearMSE.pth",
+        )
         state_dict = self.load_pth(pth_path, dtype)
         ms.load_param_into_net(self.mlp, state_dict, strict_load=True)
         self.clip.set_train(False)
@@ -43,17 +43,22 @@ class AestheticScorer(Scorer):
         for name, value in torch_data.items():
             if value.dtype == torch.bfloat16:
                 mindspore_data[name] = ms.Parameter(
-                    ms.Tensor(value.view(dtype=torch.uint16).numpy().view(
-                        ml_dtypes.bfloat16),
-                              dtype=dtype))
+                    ms.Tensor(
+                        value.view(dtype=torch.uint16).numpy().view(ml_dtypes.bfloat16),
+                        dtype=dtype,
+                    )
+                )
             else:
                 mindspore_data[name] = ms.Parameter(
-                    ms.Tensor(value.numpy(), dtype=dtype))
+                    ms.Tensor(value.numpy(), dtype=dtype)
+                )
         return mindspore_data
 
-    def __call__(self,
-                 images: Union[List[Image.Image], np.ndarray, ms.Tensor],
-                 prompts: Optional[List[str]] = None) -> List[float]:
+    def __call__(
+        self,
+        images: Union[List[Image.Image], np.ndarray, ms.Tensor],
+        prompts: Optional[List[str]] = None,
+    ) -> List[float]:
         if isinstance(images, (np.ndarray, ms.Tensor)):
             images = self.array_to_images(images)
 
@@ -70,14 +75,16 @@ class MLP(nn.Cell):
 
     def __init__(self, dtype: ms.Type = ms.float32) -> None:
         super().__init__()
-        self.layers = nn.SequentialCell(mint.nn.Linear(768, 1024, dtype=dtype),
-                                        mint.nn.Dropout(0.2),
-                                        mint.nn.Linear(1024, 128, dtype=dtype),
-                                        mint.nn.Dropout(0.2),
-                                        mint.nn.Linear(128, 64, dtype=dtype),
-                                        mint.nn.Dropout(0.1),
-                                        mint.nn.Linear(64, 16, dtype=dtype),
-                                        mint.nn.Linear(16, 1, dtype=dtype))
+        self.layers = nn.SequentialCell(
+            mint.nn.Linear(768, 1024, dtype=dtype),
+            mint.nn.Dropout(0.2),
+            mint.nn.Linear(1024, 128, dtype=dtype),
+            mint.nn.Dropout(0.2),
+            mint.nn.Linear(128, 64, dtype=dtype),
+            mint.nn.Dropout(0.1),
+            mint.nn.Linear(64, 16, dtype=dtype),
+            mint.nn.Linear(16, 1, dtype=dtype),
+        )
 
     def construct(self, embed: ms.Tensor) -> ms.Tensor:
         return self.layers(embed)
