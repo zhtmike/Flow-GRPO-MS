@@ -490,7 +490,7 @@ def train(args: argparse.Namespace):
 
         # gather rewards across processes
         gathered_rewards = {
-            key: gather(ms.tensor(value)).numpy()
+            key: gather(ms.tensor(value, dtype=ms.float32)).numpy()
             for key, value in samples["rewards"].items()
         }
 
@@ -513,35 +513,11 @@ def train(args: argparse.Namespace):
             )
 
         # ungather advantages; we only need to keep the entries corresponding to the samples on this process
-        advantages = advantages.astype(np.float32)
         samples["advantages"] = advantages.reshape(
             num_processes, -1, advantages.shape[-1]
         )[process_index]
 
         del samples["rewards"]
-
-        # Get the mask for samples where all advantages are zero across the time dimension
-        mask = np.abs(samples["advantages"]).sum(axis=1) != 0
-
-        # If the number of True values in mask is not divisible by config.sample.num_batches_per_epoch,
-        # randomly change some False values to True to make it divisible
-        num_batches = args.num_batches_per_epoch
-        true_count = mask.sum()
-        if true_count % num_batches != 0:
-            false_indices = np.where(~mask)[0]
-            num_to_change = num_batches - (true_count % num_batches)
-            if len(false_indices) >= num_to_change:
-                random_indices = np.random.permutation(len(false_indices))[
-                    :num_to_change
-                ]
-                mask[false_indices[random_indices]] = True
-
-        # Filter out samples where the entire time dimension of advantages is zero
-        samples = {k: v[mask] for k, v in samples.items()}
-
-        if samples["advantages"].size == 0:
-            logger.warning("No samples left after filtering. Skipping this epoch.")
-            continue
 
         total_batch_size, num_timesteps = samples["timesteps"].shape
         assert num_timesteps == args.num_steps
@@ -556,7 +532,6 @@ def train(args: argparse.Namespace):
                     if "_strict_accuracy" not in key and "_accuracy" not in key
                 },
                 "advantages": np.abs(samples["advantages"]).mean().item(),
-                "actual_batch_size": mask.sum().item() // num_batches,
             }
         )
 
@@ -798,7 +773,7 @@ def main():
         help="Number of inner epochs to train for",
     )
     group.add_argument(
-        "--train-batch-size", type=int, default=6, help="Batch size for training"
+        "--train-batch-size", type=int, default=5, help="Batch size for training"
     )
     group.add_argument(
         "--num-batches-per-epoch",
@@ -809,7 +784,7 @@ def main():
     group.add_argument(
         "--num-image-per-prompt",
         type=int,
-        default=6,
+        default=5,
         help="Number of images to generate per prompt",
     )
     group.add_argument(
@@ -867,7 +842,7 @@ def main():
         help="Guidance scale for classifier-free guidance",
     )
     group.add_argument(
-        "--test-batch-size", type=int, default=6, help="Batch size for evaluation"
+        "--test-batch-size", type=int, default=5, help="Batch size for evaluation"
     )
     group.add_argument(
         "--eval-freq",
@@ -884,7 +859,7 @@ def main():
     group.add_argument(
         "--validation-num",
         type=int,
-        default=12,
+        default=10,
         help="Number of validation samples to generate during evaluation",
     )
     group.add_argument(

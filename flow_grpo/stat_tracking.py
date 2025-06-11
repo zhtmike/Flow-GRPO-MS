@@ -1,66 +1,51 @@
+from collections import defaultdict
+from typing import List
+
 import numpy as np
 
 
 class PerPromptStatTracker:
 
-    def __init__(self, global_std=False):
+    def __init__(self, global_std: bool = False) -> None:
         self.global_std = global_std
-        self.stats = {}
-        self.history_prompts = set()
+        self.stats = defaultdict(list)
 
-    # exp reward is for rwr
-    def update(self, prompts, rewards, exp=False):
+    def update(self, prompts: List[str], rewards: np.ndarray) -> np.ndarray:
+        """
+        prompts (N, )
+        rewards (N, T)
+        """
         prompts = np.array(prompts)
-        rewards = np.array(rewards, dtype=np.float64)
-        unique = np.unique(prompts)
-        advantages = np.zeros_like(rewards)
-        for prompt in unique:
+        unique_prompts = np.unique(prompts)
+        advantages = np.zeros_like(rewards, dtype=np.float32)
+
+        for prompt in unique_prompts:
             prompt_rewards = rewards[prompts == prompt]
-            if prompt not in self.stats:
-                self.stats[prompt] = []
             self.stats[prompt].extend(prompt_rewards)
-            self.history_prompts.add(
-                hash(prompt)
-            )  # Add hash of prompt to history_prompts
-        for prompt in unique:
-            self.stats[prompt] = np.stack(self.stats[prompt])
-            prompt_rewards = rewards[
-                prompts == prompt
-            ]  # Fix: Recalculate prompt_rewards for each prompt
-            mean = np.mean(self.stats[prompt], axis=0, keepdims=True)
+
+        for prompt, prompt_reward in self.stats.items():
+            self.stats[prompt] = np.stack(prompt_reward)
+
+        for prompt, prompt_reward in self.stats.items():
+            mean = np.mean(prompt_reward, axis=0, keepdims=True)
             if self.global_std:
-                std = (
-                    np.std(rewards, axis=0, keepdims=True) + 1e-4
-                )  # Use global std of all rewards
+                std = np.std(rewards, axis=0, keepdims=True) + 1e-4
             else:
-                std = np.std(self.stats[prompt], axis=0, keepdims=True) + 1e-4
-            advantages[prompts == prompt] = (prompt_rewards - mean) / std
+                std = np.std(prompt_reward, axis=0, keepdims=True) + 1e-4
+            advantages[prompts == prompt] = (prompt_reward - mean) / std
         return advantages
 
-    def get_stats(self):
-        avg_group_size = (
-            sum(len(v) for v in self.stats.values()) / len(self.stats)
-            if self.stats
-            else 0
-        )
-        history_prompts = len(self.history_prompts)
-        return avg_group_size, history_prompts
-
     def clear(self):
-        self.stats = {}
+        self.stats = defaultdict(list)
 
 
 def main():
     tracker = PerPromptStatTracker()
     prompts = ["a", "b", "a", "c", "b", "a"]
-    rewards = [1, 2, 3, 4, 5, 6]
+    rewards = np.array([1, 2, 3, 4, 5, 6])
+    rewards = np.tile(rewards[..., None], (1, 10))
     advantages = tracker.update(prompts, rewards)
     print("Advantages:", advantages)
-    avg_group_size, history_prompts = tracker.get_stats()
-    print("Average Group Size:", avg_group_size)
-    print("History Prompts:", history_prompts)
-    tracker.clear()
-    print("Stats after clear:", tracker.stats)
 
 
 if __name__ == "__main__":
