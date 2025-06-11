@@ -266,14 +266,10 @@ class QwenVLOCRVLLMScorer(VLLMScorer):
             # remove any nonvisible characters and convert to lowercase
             prompt = re.sub(r"\s+", "", prompt).lower()
             text = re.sub(r"\s+", "", text).lower()
-            if prompt in text:
-                dist = 0
-            else:
-                dist = Levenshtein.distance(text, prompt)
+            dist = Levenshtein.distance(text, prompt)
 
             # recognized many unrelated characters, only add one character penalty
-            if dist > len(prompt):
-                dist = len(prompt)
+            dist = min(dist, len(prompt))
 
             score = 1 - dist / len(prompt)
             scores.append(score)
