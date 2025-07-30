@@ -6,8 +6,10 @@ from mindspore.mint.optim.adamw import (
 )
 from mindspore.ops import functional as F
 
+__all__ = ["BF16AdamW"]
 
-def update_param(source: ms.Tensor, target: ms.Tensor) -> None:
+
+def update_param(source: ms.Parameter, target: ms.Parameter) -> None:
     target.copy_(source.to(target.dtype))
 
 

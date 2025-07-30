@@ -12,9 +12,11 @@ import numpy as np
 from openai import AsyncOpenAI
 from PIL import Image
 
-from .scorer import Scorer
+from ._scorer import Scorer
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["QwenVLVLLMScorer", "UnifiedRewardVLLMScorer", "QwenVLOCRVLLMScorer"]
 
 
 class VLLMScorer(Scorer):

@@ -3,25 +3,27 @@ from typing import Optional, Tuple
 import mindspore as ms
 import mindspore.mint as mint
 import mindspore.nn as nn
-from mindone.diffusers import SD3Transformer2DModel
+from mindone.diffusers import WanTransformer3DModel
 
-from .pipelines import StableDiffusion3PipelineWithSDELogProb
+from .pipelines import WanPipelineWithSDELogProb
 from .schedulers import FlowMatchEulerSDEDiscreteScheduler
 from .utils import compute_log_prob
 
+__all__ = ["WanNetWithLoss"]
 
-class NetWithLoss(nn.Cell):
+
+class WanNetWithLoss(nn.Cell):
 
     def __init__(
         self,
-        pipeline: StableDiffusion3PipelineWithSDELogProb,
+        pipeline: WanPipelineWithSDELogProb,
         guidance_scale: float = 1.0,
         adv_clip_max: float = 5.0,
         beta: float = 0.001,
         clip_range: float = 1e-4,
     ) -> None:
         super().__init__()
-        self.transformer: SD3Transformer2DModel = pipeline.transformer
+        self.transformer: WanTransformer3DModel = pipeline.transformer
         self.scheduler: FlowMatchEulerSDEDiscreteScheduler = pipeline.scheduler
         self.guidance_scale = guidance_scale
         self.adv_clip_max = adv_clip_max
@@ -34,16 +36,14 @@ class NetWithLoss(nn.Cell):
         next_latents: ms.Tensor,
         timesteps: ms.Tensor,
         embeds: ms.Tensor,
-        pooled_embeds: ms.Tensor,
         sigma: ms.Tensor,
         sigma_next: ms.Tensor,
     ) -> Tuple[ms.Tensor, ms.Tensor, ms.Tensor]:
         if self.guidance_scale > 1.0:
             noise_pred = self.transformer(
-                hidden_states=mint.cat([latents] * 2),
+                hidden_states=mint.cat([latents] * 2).to(self.transformer.dtype),
                 timestep=mint.cat([timesteps] * 2),
                 encoder_hidden_states=embeds,
-                pooled_projections=pooled_embeds,
                 return_dict=False,
             )[0]
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -52,10 +52,9 @@ class NetWithLoss(nn.Cell):
             )
         else:
             noise_pred = self.transformer(
-                hidden_states=latents,
+                hidden_states=latents.to(self.transformer.dtype),
                 timestep=timesteps,
                 encoder_hidden_states=embeds,
-                pooled_projections=pooled_embeds,
                 return_dict=False,
             )[0]
 
@@ -74,7 +73,6 @@ class NetWithLoss(nn.Cell):
         next_latents: ms.Tensor,
         timesteps: ms.Tensor,
         embeds: ms.Tensor,
-        pooled_embeds: ms.Tensor,
         advantages: ms.Tensor,
         sample_log_probs: ms.Tensor,
         sigma: ms.Tensor,
@@ -86,7 +84,7 @@ class NetWithLoss(nn.Cell):
             assert prev_sample_mean_ref is not None
 
         log_prob, prev_sample_mean, var_t = self.compute_log_prob(
-            latents, next_latents, timesteps, embeds, pooled_embeds, sigma, sigma_next
+            latents, next_latents, timesteps, embeds, sigma, sigma_next
         )
         # grpo logic
         advantages = mint.clamp(

@@ -11,20 +11,21 @@ import mindspore.nn as nn
 import numpy as np
 from mindone.diffusers import FlowMatchEulerDiscreteScheduler
 from mindone.diffusers._peft import LoraConfig, PeftModel, get_peft_model
+from mindone.diffusers.utils import export_to_video
 from mindspore.dataset import DictIterator, GeneratorDataset
 from tqdm import tqdm, trange
 
 from flow_grpo.dataset import DistributedKRepeatSampler, TextPromptDataset
 from flow_grpo.ema import EMAModuleWrapper
 from flow_grpo.logging import get_logger
-from flow_grpo.misc import init_sd3_debug_pipeline
+from flow_grpo.misc import init_wan21_debug_pipeline
 from flow_grpo.optim import BF16AdamW
 from flow_grpo.scorer import AVAILABLE_SCORERS, MultiScorer
 from flow_grpo.stat_tracking import PerPromptStatTracker
 from flow_grpo.trainer import (
     FlowMatchEulerSDEDiscreteScheduler,
-    StableDiffusion3NetWithLoss,
-    StableDiffusion3PipelineWithSDELogProb,
+    WanNetWithLoss,
+    WanPipelineWithSDELogProb,
 )
 from flow_grpo.utils import (
     clip_by_global_norm,
@@ -35,25 +36,26 @@ from flow_grpo.utils import (
     syn_gradients,
 )
 
-DEFAULT_MODEL = "stabilityai/stable-diffusion-3.5-medium"
+DEFAULT_MODEL = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 
 logger = get_logger()
 
 
 def evaluate(
-    pipeline: StableDiffusion3PipelineWithSDELogProb,
+    pipeline: WanPipelineWithSDELogProb,
     reward_fn: MultiScorer,
     test_iter: DictIterator,
     sample_neg_prompt_embeds: ms.Tensor,
-    sample_neg_pooled_prompt_embeds: ms.Tensor,
     scheduler: Optional[FlowMatchEulerDiscreteScheduler] = None,
     outdir: str = "output",
     ema: Optional[EMAModuleWrapper] = None,
     total_num: Optional[int] = None,
-    eval_num_steps: int = 40,
-    guidance_scale: float = 1.0,
-    resolution: int = 512,
-    max_sequence_length: int = 128,
+    eval_num_steps: int = 50,
+    guidance_scale: float = 5.0,
+    height: int = 480,
+    width: int = 832,
+    num_frames: int = 81,
+    max_sequence_length: int = 512,
     seed: int = 0,
 ) -> None:
     if ema:
@@ -74,43 +76,40 @@ def evaluate(
     total_prompts = list()
     all_rewards = defaultdict(list)
 
-    # generate the images with the same initials noise for each evaluation step
+    # generate the videos with the same initials noise for each evaluation step
     generator = np.random.default_rng(seed)
     for i, test_batch in tqdm(
         enumerate(test_iter), desc="Eval: ", total=total_num, dynamic_ncols=True
     ):
         prompts = test_batch["prompt"].tolist()
-        prompt_embeds, _, pooled_prompt_embeds, _ = pipeline.encode_prompt(
+        prompt_embeds, _ = pipeline.encode_prompt(
             prompts,
-            None,
-            None,
             do_classifier_free_guidance=False,
             max_sequence_length=max_sequence_length,
         )
 
         output = pipeline(
             prompt_embeds=prompt_embeds,
-            pooled_prompt_embeds=pooled_prompt_embeds,
             negative_prompt_embeds=sample_neg_prompt_embeds,
-            negative_pooled_prompt_embeds=sample_neg_pooled_prompt_embeds,
             num_inference_steps=eval_num_steps,
             guidance_scale=guidance_scale,
-            output_type="pil",
+            output_type="np",
             return_dict=True,
-            height=resolution,
-            width=resolution,
+            height=height,
+            width=width,
+            num_frames=num_frames,
             generator=generator,
         )
 
-        # save the image for visualization
-        for j, (prompt, image) in enumerate(zip(prompts, output.images)):
+        # save the videos for visualization
+        for j, (prompt, frames) in enumerate(zip(prompts, output.frames)):
             num = i * len(prompts) + j
-            fname = f"{num}.jpg"
+            fname = f"{num}.mp4"
             total_prompts.append((fname, prompt))
-            image.save(os.path.join(outdir, fname))
+            export_to_video(frames, os.path.join(outdir, fname), fps=15)
 
         # calculate the validation reward
-        rewards = reward_fn(output.images, prompts)
+        rewards = reward_fn(output.frames, prompts)
         for k, v in rewards.items():
             all_rewards[k].extend(v)
 
@@ -157,12 +156,10 @@ def train(args: argparse.Namespace):
     # load scheduler, tokenizer and models.
     if args.debug:
         ms.runtime.launch_blocking()
-        pipeline = init_sd3_debug_pipeline(args.model)
+        pipeline = init_wan21_debug_pipeline(args.model)
     else:
         with nn.no_init_parameters():
-            pipeline = StableDiffusion3PipelineWithSDELogProb.from_pretrained(
-                args.model
-            )
+            pipeline = WanPipelineWithSDELogProb.from_pretrained(args.model)
 
     # replace scheduler with FlowMatchEulerSDEDiscreteScheduler
     original_scheduler = pipeline.scheduler
@@ -176,12 +173,7 @@ def train(args: argparse.Namespace):
     # freeze parameters of models to save more memory
     requires_grad_(pipeline.vae, False)
     requires_grad_(pipeline.text_encoder, False)
-    requires_grad_(pipeline.text_encoder_2, False)
-    requires_grad_(pipeline.text_encoder_3, False)
     requires_grad_(pipeline.transformer, not args.use_lora)
-
-    # disable safety checker
-    pipeline.safety_checker = None
 
     # make the progress bar nicer
     pipeline.set_progress_bar_config(
@@ -203,20 +195,18 @@ def train(args: argparse.Namespace):
     # cast inference time
     pipeline.vae.to(ms.float32)
     pipeline.text_encoder.to(inference_dtype)
-    pipeline.text_encoder_2.to(inference_dtype)
-    pipeline.text_encoder_3.to(inference_dtype)
 
     if args.use_lora:
         # Set correct lora layers
         target_modules = [
-            "attn.add_k_proj",
-            "attn.add_q_proj",
-            "attn.add_v_proj",
-            "attn.to_add_out",
-            "attn.to_k",
-            "attn.to_out.0",
-            "attn.to_q",
-            "attn.to_v",
+            "attn1.to_q",
+            "attn1.to_k",
+            "attn1.to_v",
+            "attn1.to_out.0",
+            "attn2.to_q",
+            "attn2.to_k",
+            "attn2.to_v",
+            "attn2.to_out.0",
         ]
         transformer_lora_config = LoraConfig(
             r=32,
@@ -247,23 +237,11 @@ def train(args: argparse.Namespace):
     text_encoder_params = sum(
         [param.size for param in pipeline.text_encoder.get_parameters()]
     )
-    text_encoder_2_params = sum(
-        [param.size for param in pipeline.text_encoder_2.get_parameters()]
-    )
-    text_encoder_3_params = sum(
-        [param.size for param in pipeline.text_encoder_3.get_parameters()]
-    )
-    total_params = (
-        transformer_params
-        + vae_params
-        + text_encoder_params
-        + text_encoder_2_params
-        + text_encoder_3_params
-    )
+    total_params = transformer_params + vae_params + text_encoder_params
     trainable_params = sum([param.size for param in trainable_parameters])
 
     logger.info(
-        f"Total num. of parameters: {total_params:,} (transformer: {transformer_params:,}, vae: {vae_params:,}, tex_encoder: {text_encoder_params:,}, text_encoder_2: {text_encoder_2_params:,}, text_encoder_3: {text_encoder_3_params:,})"
+        f"Total num. of parameters: {total_params:,} (transformer: {transformer_params:,}, vae: {vae_params:,}, tex_encoder: {text_encoder_params:,})"
     )
     logger.info(f"Total num. of trainable parameters: {trainable_params:,}")
 
@@ -291,7 +269,7 @@ def train(args: argparse.Namespace):
     test_dataset = TextPromptDataset(args.dataset, "test", max_num=args.validation_num)
     train_sampler = DistributedKRepeatSampler(
         batch_size=args.train_batch_size,
-        k=args.num_image_per_prompt,
+        k=args.num_video_per_prompt,
         num_shards=num_processes,
         shard_id=process_index,
         num_iters=args.num_epochs * args.num_batches_per_epoch,
@@ -313,28 +291,20 @@ def train(args: argparse.Namespace):
     )
 
     # compute the native prompt embeddings first to save computation time
-    neg_prompt_embed, _, neg_pooled_prompt_embed, _ = pipeline.encode_prompt(
+    neg_prompt_embed, _ = pipeline.encode_prompt(
         "",
-        None,
-        None,
         do_classifier_free_guidance=False,
         max_sequence_length=args.max_sequence_length,
     )
 
     sample_neg_prompt_embeds = neg_prompt_embed.repeat(args.test_batch_size, 1, 1)
     train_neg_prompt_embeds = neg_prompt_embed.repeat(args.train_batch_size, 1, 1)
-    sample_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(
-        args.test_batch_size, 1
-    )
-    train_neg_pooled_prompt_embeds = neg_pooled_prompt_embed.repeat(
-        args.train_batch_size, 1
-    )
 
-    if args.num_image_per_prompt == 1 and args.per_prompt_stat_tracking:
+    if args.num_video_per_prompt == 1 and args.per_prompt_stat_tracking:
         logger.warning(
-            "Per prompt stat tracking is enabled, but num_image_per_prompt is set to 1. "
+            "Per prompt stat tracking is enabled, but num_video_per_prompt is set to 1. "
             "This will result in no per prompt stats being tracked. "
-            "Please set num_image_per_prompt > 1 to enable per prompt stat tracking."
+            "Please set num_video_per_prompt > 1 to enable per prompt stat tracking."
         )
         args.per_prompt_stat_tracking = False
 
@@ -371,7 +341,7 @@ def train(args: argparse.Namespace):
     train_iter = train_dataloader.create_dict_iterator(output_numpy=True)
     test_iter = test_dataloader.create_dict_iterator(output_numpy=True)
 
-    net_with_loss = StableDiffusion3NetWithLoss(
+    net_with_loss = WanNetWithLoss(
         pipeline,
         guidance_scale=args.guidance_scale,
         adv_clip_max=args.adv_clip_max,
@@ -395,14 +365,15 @@ def train(args: argparse.Namespace):
                 reward_fn,
                 test_iter,
                 sample_neg_prompt_embeds,
-                sample_neg_pooled_prompt_embeds,
                 scheduler=original_scheduler,
                 outdir=outdir,
                 ema=ema,
                 total_num=len(test_dataloader),
                 eval_num_steps=args.eval_num_steps,
                 guidance_scale=args.guidance_scale,
-                resolution=args.resolution,
+                height=args.height,
+                width=args.width,
+                num_frames=args.num_frames,
                 max_sequence_length=args.max_sequence_length,
                 seed=args.seed,
             )
@@ -424,25 +395,22 @@ def train(args: argparse.Namespace):
         ):
             prompts = next(train_iter)["prompt"].tolist()
 
-            prompt_embeds, _, pooled_prompt_embeds, _ = pipeline.encode_prompt(
+            prompt_embeds, _ = pipeline.encode_prompt(
                 prompts,
-                None,
-                None,
                 do_classifier_free_guidance=False,
                 max_sequence_length=args.max_sequence_length,
             )
 
             output = pipeline(
                 prompt_embeds=prompt_embeds,
-                pooled_prompt_embeds=pooled_prompt_embeds,
                 negative_prompt_embeds=sample_neg_prompt_embeds,
-                negative_pooled_prompt_embeds=sample_neg_pooled_prompt_embeds,
                 num_inference_steps=args.num_steps,
                 guidance_scale=args.guidance_scale,
-                output_type="pil",
+                output_type="np",
                 return_dict=True,
-                height=args.resolution,
-                width=args.resolution,
+                height=args.height,
+                width=args.width,
+                num_frames=args.num_frames,
             )
 
             # (batch_size, num_steps + 1, 16, 96, 96)
@@ -457,13 +425,12 @@ def train(args: argparse.Namespace):
             ).numpy()
 
             # compute rewards asynchronously
-            rewards = reward_fn(output.images, prompts)
+            rewards = reward_fn(output.frames, prompts)
 
             samples.append(
                 {
                     "prompts": prompts,
                     "prompt_embeds": prompt_embeds.numpy(),
-                    "pooled_prompt_embeds": pooled_prompt_embeds.numpy(),
                     "timesteps": timesteps,
                     "latents": latents[:, :-1],
                     "next_latents": latents[:, 1:],
@@ -499,11 +466,11 @@ def train(args: argparse.Namespace):
             # gather the prompts across processes
             prompts = gather(samples["prompts"].tolist())
             advantages = stat_tracker.update(prompts, gathered_rewards["avg"])
-            if len(set(prompts)) != samples_per_epoch // args.num_image_per_prompt:
+            if len(set(prompts)) != samples_per_epoch // args.num_video_per_prompt:
                 logger.warning(
                     (
                         f"Number of unique prompts {len(set(prompts))} does not equal "
-                        f"to the sammples per epoch {samples_per_epoch} / num_image_per_prompt {args.num_image_per_prompt}."
+                        f"to the sammples per epoch {samples_per_epoch} / num_video_per_prompt {args.num_video_per_prompt}."
                     )
                 )
             stat_tracker.clear()
@@ -576,15 +543,8 @@ def train(args: argparse.Namespace):
                     embeds = mint.cat(
                         [train_neg_prompt_embeds, ms.tensor(sample["prompt_embeds"])]
                     )
-                    pooled_embeds = mint.cat(
-                        [
-                            train_neg_pooled_prompt_embeds,
-                            ms.tensor(sample["pooled_prompt_embeds"]),
-                        ]
-                    )
                 else:
                     embeds = ms.tensor(sample["prompt_embeds"])
-                    pooled_embeds = ms.tensor(sample["pooled_prompt_embeds"])
 
                 avg_loss = list()
                 for j in tqdm(
@@ -605,9 +565,9 @@ def train(args: argparse.Namespace):
                         pipeline.scheduler.index_for_timestep(t) for t in timesteps
                     ]
                     next_step_index = [step + 1 for step in step_index]
-                    sigma = pipeline.scheduler.sigmas[step_index].view(-1, 1, 1, 1)
+                    sigma = pipeline.scheduler.sigmas[step_index].view(-1, 1, 1, 1, 1)
                     sigma_next = pipeline.scheduler.sigmas[next_step_index].view(
-                        -1, 1, 1, 1
+                        -1, 1, 1, 1, 1
                     )
 
                     with pipeline.transformer.disable_adapter():
@@ -616,7 +576,6 @@ def train(args: argparse.Namespace):
                             next_latents,
                             timesteps,
                             embeds,
-                            pooled_embeds,
                             sigma,
                             sigma_next,
                         )
@@ -626,7 +585,6 @@ def train(args: argparse.Namespace):
                         next_latents,
                         timesteps,
                         embeds,
-                        pooled_embeds,
                         advantages,
                         sample_log_probs,
                         sigma,
@@ -669,7 +627,7 @@ def train(args: argparse.Namespace):
 
 def main():
     parser = argparse.ArgumentParser(
-        usage="Training SD3 with GRPO",
+        usage="Training Wan2.1 with GRPO",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -683,14 +641,26 @@ def main():
         help="Reward function(s) to use for training",
     )
     group.add_argument(
-        "--resolution",
-        default=512,
+        "--height",
+        default=480,
         type=int,
-        help="Image resolution for training and sampling",
+        help="Video height for training and sampling",
+    )
+    group.add_argument(
+        "--width",
+        default=832,
+        type=int,
+        help="Video width for training and sampling",
+    )
+    group.add_argument(
+        "--num-frames",
+        default=81,
+        type=int,
+        help="Video frames for training and sampling",
     )
     group.add_argument(
         "--max-sequence-length",
-        default=128,
+        default=512,
         type=int,
         help="Maximum sequence length for text prompts",
     )
@@ -773,7 +743,7 @@ def main():
         help="Number of inner epochs to train for",
     )
     group.add_argument(
-        "--train-batch-size", type=int, default=5, help="Batch size for training"
+        "--train-batch-size", type=int, default=1, help="Batch size for training"
     )
     group.add_argument(
         "--num-batches-per-epoch",
@@ -782,10 +752,10 @@ def main():
         help="Number of batches per epoch",
     )
     group.add_argument(
-        "--num-image-per-prompt",
+        "--num-video-per-prompt",
         type=int,
-        default=5,
-        help="Number of images to generate per prompt",
+        default=1,
+        help="Number of videos to generate per prompt",
     )
     group.add_argument(
         "--gradient-accumulation-steps",
@@ -838,11 +808,11 @@ def main():
     group.add_argument(
         "--guidance-scale",
         type=float,
-        default=4.5,
+        default=5.0,
         help="Guidance scale for classifier-free guidance",
     )
     group.add_argument(
-        "--test-batch-size", type=int, default=5, help="Batch size for evaluation"
+        "--test-batch-size", type=int, default=1, help="Batch size for evaluation"
     )
     group.add_argument(
         "--eval-freq",
@@ -853,7 +823,7 @@ def main():
     group.add_argument(
         "--eval-num-steps",
         type=int,
-        default=40,
+        default=50,
         help="Number of steps to sample from the diffusion model during evaluation",
     )
     group.add_argument(

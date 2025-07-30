@@ -12,7 +12,9 @@ from mindone.transformers import CLIPModel
 from PIL import Image
 from transformers import CLIPProcessor
 
-from .scorer import Scorer
+from ._scorer import Scorer
+
+__all__ = ["AestheticScorer"]
 
 
 class AestheticScorer(Scorer):

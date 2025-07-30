@@ -17,6 +17,11 @@ from mindone.diffusers.utils.outputs import BaseOutput
 from ..schedulers import FlowMatchEulerSDEDiscreteSchedulerOutput
 from ..utils import compute_log_prob
 
+__all__ = [
+    "StableDiffusion3PipelineWithSDELogProb",
+    "StableDiffusionPipelineOutputeWithSDELogProb",
+]
+
 
 @dataclass
 class StableDiffusionPipelineOutputeWithSDELogProb(BaseOutput):
@@ -167,10 +172,10 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
             )
             mu = calculate_shift(
                 image_seq_len,
-                self.scheduler.config.base_image_seq_len,
-                self.scheduler.config.max_image_seq_len,
-                self.scheduler.config.base_shift,
-                self.scheduler.config.max_shift,
+                self.scheduler.config.get("base_image_seq_len", 256),
+                self.scheduler.config.get("max_image_seq_len", 4096),
+                self.scheduler.config.get("base_shift", 0.5),
+                self.scheduler.config.get("max_shift", 1.16),
             )
             scheduler_kwargs["mu"] = mu
         elif mu is not None:
@@ -222,7 +227,7 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
                     else latents
                 )
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-                timestep = t.expand((latent_model_input.shape[0],))
+                timestep = t.broadcast_to((latent_model_input.shape[0],))
 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -246,7 +251,7 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
                         else False
                     )
                     if skip_guidance_layers is not None and should_skip_layers:
-                        timestep = t.expand((latents.shape[0],))
+                        timestep = t.broadcast_to((latents.shape[0],))
                         latent_model_input = latents
                         noise_pred_skip_layers = self.transformer(
                             hidden_states=latent_model_input,
@@ -278,11 +283,10 @@ class StableDiffusion3PipelineWithSDELogProb(StableDiffusion3Pipeline):
                     log_prob = None
 
                 latents = output.prev_sample
-                all_latents.append(latents)
-                all_log_probs.append(log_prob)
-
                 if latents.dtype != latents_dtype:
                     latents = latents.to(latents_dtype)
+                all_latents.append(latents)
+                all_log_probs.append(log_prob)
 
                 if callback_on_step_end is not None:
                     callback_kwargs = {}

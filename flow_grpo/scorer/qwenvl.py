@@ -12,7 +12,9 @@ from PIL import Image
 from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor, Qwen2VLProcessor
 
-from .scorer import Scorer
+from ._scorer import Scorer
+
+__all__ = ["QwenVLScorer"]
 
 
 class QwenVLScorer(Scorer):

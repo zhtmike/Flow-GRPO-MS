@@ -5,12 +5,16 @@ import mindspore as ms
 import numpy as np
 from PIL import Image
 
-from .scorer import Scorer
+from ._scorer import Scorer
+
+__all__ = ["AVAILABLE_SCORERS", "MultiScorer"]
 
 AVAILABLE_SCORERS = {
     "aesthetic": ("aesthetic", "AestheticScorer"),
     "jpeg-compressibility": ("compression", "JpegCompressibilityScorer"),
     "jpeg-imcompressibility": ("compression", "JpegImcompressibilityScorer"),
+    "mp4-compressibility": ("compression", "MP4CompressibilityScorer"),
+    "mp4-imcompressibility": ("compression", "MP4ImcompressibilityScorer"),
     "pickscore": ("pickscore", "PickScoreScorer"),
     "qwenvl": ("qwenvl", "QwenVLScorer"),
     "qwenvl-ocr-vllm": ("vllm", "QwenVLOCRVLLMScorer"),

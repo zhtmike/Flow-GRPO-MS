@@ -9,7 +9,9 @@ from mindone.transformers import AutoModel, CLIPModel
 from PIL import Image
 from transformers import AutoProcessor
 
-from .scorer import Scorer
+from ._scorer import Scorer
+
+__all__ = ["PickScoreScorer"]
 
 
 class PickScoreScorer(Scorer):

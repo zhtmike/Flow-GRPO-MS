@@ -1,5 +1,6 @@
 #!/bin/sh
 SD3_PATH="/home/hyx/models/stable-diffusion-3.5-medium"
+WAN21_PATH="/home/mikecheung/model/Wan2.1-T2V-1.3B-Diffusers"
 
 export PYTHONPATH="/home/mikecheung/gitlocal/mindone:$PYTHONPATH"
 
@@ -25,7 +26,12 @@ export TOKENIZERS_PARALLELISM=False
 # python -m flow_grpo.scorer.pickscore
 # python -m flow_grpo.scorer.vllm
 
-# training with one card
+# training sd3 with one card
 msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts/train_sd3.py \
     --reward jpeg-compressibility \
     --model $SD3_PATH \
+
+# training wan2.1 with one card
+# msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts/train_wan21.py \
+#     --reward mp4-compressibility \
+#     --model $WAN21_PATH \
