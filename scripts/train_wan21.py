@@ -196,6 +196,9 @@ def train(args: argparse.Namespace):
     pipeline.vae.to(ms.float32)
     pipeline.text_encoder.to(inference_dtype)
 
+    # enable recompute
+    pipeline.transformer.enable_gradient_checkpointing()
+
     if args.use_lora:
         # Set correct lora layers
         target_modules = [

@@ -28,10 +28,10 @@ export TOKENIZERS_PARALLELISM=False
 
 # training sd3 with one card
 msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts/train_sd3.py \
-    --reward jpeg-compressibility \
-    --model $SD3_PATH \
+    --reward jpeg-imcompressibility \
+    --model $SD3_PATH
 
-# training wan2.1 with one card
+# training wan2.1 with one card (demo)
 # msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts/train_wan21.py \
-#     --reward mp4-compressibility \
-#     --model $WAN21_PATH \
+#     --reward mp4-imcompressibility \
+#     --model $WAN21_PATH
