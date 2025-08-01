@@ -56,8 +56,11 @@ def evaluate(
     width: int = 832,
     num_frames: int = 81,
     max_sequence_length: int = 512,
+    process_index: int = 0,
     seed: int = 0,
 ) -> None:
+    is_main_process = process_index == 0
+
     if ema:
         # copy the ema parameters to the model
         ema.copy_ema_to_model()
@@ -79,7 +82,11 @@ def evaluate(
     # generate the videos with the same initials noise for each evaluation step
     generator = np.random.default_rng(seed)
     for i, test_batch in tqdm(
-        enumerate(test_iter), desc="Eval: ", total=total_num, dynamic_ncols=True
+        enumerate(test_iter),
+        desc="Eval: ",
+        total=total_num,
+        disable=not is_main_process,
+        dynamic_ncols=True,
     ):
         prompts = test_batch["prompt"].tolist()
         prompt_embeds, _ = pipeline.encode_prompt(
@@ -104,7 +111,7 @@ def evaluate(
         # save the videos for visualization
         for j, (prompt, frames) in enumerate(zip(prompts, output.frames)):
             num = i * len(prompts) + j
-            fname = f"{num}.mp4"
+            fname = f"rank_{process_index}_{num}.mp4"
             total_prompts.append((fname, prompt))
             export_to_video(frames, os.path.join(outdir, fname), fps=15)
 
@@ -118,7 +125,7 @@ def evaluate(
         avg_rewards[k] = np.mean(v).item()
 
     logger.info(f"Validation rewards: {avg_rewards}")
-    with open(os.path.join(outdir, "prompt.txt"), "w") as f:
+    with open(os.path.join(outdir, f"rank_{process_index}_prompt.txt"), "w") as f:
         for fname, prompt in total_prompts:
             f.write(f"{fname},{prompt}\n")
 
@@ -163,11 +170,8 @@ def train(args: argparse.Namespace):
 
     # replace scheduler with FlowMatchEulerSDEDiscreteScheduler
     original_scheduler = pipeline.scheduler
-    scheduler_config = FlowMatchEulerSDEDiscreteScheduler.load_config(
-        args.model, subfolder="scheduler"
-    )
-    pipeline.scheduler = FlowMatchEulerSDEDiscreteScheduler.from_config(
-        scheduler_config
+    pipeline.scheduler = FlowMatchEulerSDEDiscreteScheduler(
+        shift=original_scheduler.config.flow_shift
     )
 
     # freeze parameters of models to save more memory
@@ -287,7 +291,12 @@ def train(args: argparse.Namespace):
     )
 
     test_dataloader = GeneratorDataset(
-        test_dataset, column_names="prompt", num_parallel_workers=1, shuffle=False
+        test_dataset,
+        column_names="prompt",
+        num_parallel_workers=1,
+        shuffle=False,
+        num_shards=num_processes,
+        shard_id=process_index,
     )
     test_dataloader = test_dataloader.batch(
         args.test_batch_size, num_parallel_workers=1, drop_remainder=False
@@ -361,14 +370,16 @@ def train(args: argparse.Namespace):
     gradient_accumulation_steps = args.gradient_accumulation_steps * num_train_timesteps
 
     for epoch in range(first_epoch, args.num_epochs):
-        if epoch % args.eval_freq == 0 and is_main_process:
+        if epoch % args.eval_freq == 0:
             outdir = os.path.join(output_dir, "visual", f"epoch_{epoch}")
             evaluate(
                 pipeline,
                 reward_fn,
                 test_iter,
                 sample_neg_prompt_embeds,
-                scheduler=original_scheduler,
+                scheduler=(
+                    original_scheduler if args.eval_with_default_scheduler else None
+                ),
                 outdir=outdir,
                 ema=ema,
                 total_num=len(test_dataloader),
@@ -378,6 +389,7 @@ def train(args: argparse.Namespace):
                 width=args.width,
                 num_frames=args.num_frames,
                 max_sequence_length=args.max_sequence_length,
+                process_index=process_index,
                 seed=args.seed,
             )
         if epoch % args.save_freq == 0 and epoch > 0 and is_main_process:
@@ -693,7 +705,7 @@ def main():
     group.add_argument(
         "--num-steps",
         type=int,
-        default=10,
+        default=20,
         help="Number of steps to sample from the diffusion model during training stage",
     )
     group.add_argument(
@@ -746,7 +758,7 @@ def main():
         help="Number of inner epochs to train for",
     )
     group.add_argument(
-        "--train-batch-size", type=int, default=1, help="Batch size for training"
+        "--train-batch-size", type=int, default=2, help="Batch size for training"
     )
     group.add_argument(
         "--num-batches-per-epoch",
@@ -757,7 +769,7 @@ def main():
     group.add_argument(
         "--num-video-per-prompt",
         type=int,
-        default=1,
+        default=4,
         help="Number of videos to generate per prompt",
     )
     group.add_argument(
@@ -815,7 +827,7 @@ def main():
         help="Guidance scale for classifier-free guidance",
     )
     group.add_argument(
-        "--test-batch-size", type=int, default=1, help="Batch size for evaluation"
+        "--test-batch-size", type=int, default=2, help="Batch size for evaluation"
     )
     group.add_argument(
         "--eval-freq",
@@ -840,6 +852,12 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether to use EMA for training",
+    )
+    group.add_argument(
+        "--eval-with-default-scheduler",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use the model's default scheduler for evaluation.",
     )
 
     # ========== dataset arguments ===========
