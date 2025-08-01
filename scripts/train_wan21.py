@@ -705,7 +705,7 @@ def main():
     group.add_argument(
         "--num-steps",
         type=int,
-        default=20,
+        default=30,
         help="Number of steps to sample from the diffusion model during training stage",
     )
     group.add_argument(
@@ -844,7 +844,7 @@ def main():
     group.add_argument(
         "--validation-num",
         type=int,
-        default=10,
+        default=8,
         help="Number of validation samples to generate during evaluation",
     )
     group.add_argument(

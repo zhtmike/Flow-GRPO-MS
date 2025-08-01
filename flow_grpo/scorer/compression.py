@@ -58,7 +58,7 @@ class JpegImcompressibilityScorer(JpegCompressibilityScorer):
 
 class MP4CompressibilityScorer(Scorer):
 
-    def __init__(self, max_size: int = 256, fps: int = 15) -> None:
+    def __init__(self, max_size: int = 1024, fps: int = 15) -> None:
         self.max_size = max_size
         self.fps = fps
 
@@ -75,10 +75,10 @@ class MP4CompressibilityScorer(Scorer):
             with tempfile.NamedTemporaryFile(suffix=".mp4") as tmpfile:
                 export_to_video(video, tmpfile.name)
                 filesize = os.path.getsize(tmpfile.name)
-                # compressed mp4 file size (mb)
-                sizes.append(filesize / 1024 / 1024)
+                # compressed mp4 file size (kb)
+                sizes.append(filesize / 1024)
 
-        # 256 mb: score 0; 0 mb: score 1
+        # 1 mb: score 0; 0 mb: score 1
         rewards = [max(0, 1 - x / self.max_size) for x in sizes]
         return rewards
 
