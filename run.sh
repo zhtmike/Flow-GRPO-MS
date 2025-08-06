@@ -35,3 +35,14 @@ msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts
 # msrun --worker_num 2 --local_worker_num 2 --master_port 9527 --join True scripts/train_wan21.py \
 #     --reward mp4-imcompressibility \
 #     --model $WAN21_PATH
+
+# training wan2.1 with two cards (experimental)
+# msrun --worker_num 2 --local_worker_num 2 --master_port 9527 --join True scripts/train_wan21.py \
+#     --reward mp4-imcompressibility \
+#     --model $WAN21_PATH \
+#     --width 480 \
+#     --num-steps 50 \
+#     --num-video-per-prompt 6 \
+#     --train-batch-size 3 \
+#     --test-batch-size 3 \
+#     --validation-num 12
