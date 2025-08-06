@@ -375,6 +375,7 @@ def train(args: argparse.Namespace):
     # the total number of optimizer steps to accumulate across.
     gradient_accumulation_steps = args.gradient_accumulation_steps * num_train_timesteps
 
+    dist.barrier()
     for epoch in range(first_epoch, args.num_epochs):
         if epoch % args.eval_freq == 0:
             outdir = os.path.join(output_dir, "visual", f"epoch_{epoch}")
