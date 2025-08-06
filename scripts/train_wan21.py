@@ -788,7 +788,7 @@ def main():
     group.add_argument(
         "--save-freq",
         type=int,
-        default=2,
+        default=1,
         help="Frequency of saving checkpoints during training",
     )
     group.add_argument(
@@ -839,7 +839,7 @@ def main():
     group.add_argument(
         "--eval-freq",
         type=int,
-        default=2,
+        default=1,
         help="Frequency of evaluation during training",
     )
     group.add_argument(
