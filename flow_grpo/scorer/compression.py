@@ -40,7 +40,7 @@ class JpegCompressibilityScorer(Scorer):
             sizes.append(buffer.tell() / 1024)
 
         # 256 kb: score 0; 0 kb: score 1
-        rewards = [max(0, 1 - x / self.max_size) for x in sizes]
+        rewards = [max(0.0, 1 - x / self.max_size) for x in sizes]
         return rewards
 
 
@@ -52,7 +52,7 @@ class JpegImcompressibilityScorer(JpegCompressibilityScorer):
         prompts: Optional[List[str]] = None,
     ) -> List[float]:
         rewards = super().__call__(images, prompts)
-        rewards = [1 - r for r in rewards]
+        rewards = [1.0 - r for r in rewards]
         return rewards
 
 
@@ -73,13 +73,13 @@ class MP4CompressibilityScorer(Scorer):
                 video = video.numpy()
 
             with tempfile.NamedTemporaryFile(suffix=".mp4") as tmpfile:
-                export_to_video(video, tmpfile.name)
+                export_to_video(video, tmpfile.name, fps=self.fps)
                 filesize = os.path.getsize(tmpfile.name)
                 # compressed mp4 file size (kb)
                 sizes.append(filesize / 1024)
 
         # 1 mb: score 0; 0 mb: score 1
-        rewards = [max(0, 1 - x / self.max_size) for x in sizes]
+        rewards = [max(0.0, 1 - x / self.max_size) for x in sizes]
         return rewards
 
 
@@ -91,7 +91,7 @@ class MP4ImcompressibilityScorer(MP4CompressibilityScorer):
         prompts: Optional[List[str]] = None,
     ) -> List[float]:
         rewards = super().__call__(videos, prompts)
-        rewards = [1 - r for r in rewards]
+        rewards = [1.0 - r for r in rewards]
         return rewards
 
 

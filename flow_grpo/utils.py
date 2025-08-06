@@ -25,7 +25,7 @@ def requires_grad_(cell: nn.Cell, requires_grad: bool = True) -> None:
         p.requires_grad = requires_grad
 
 
-def gather(x: Union[ms.Tensor, List[str]]) -> Union[ms.Tensor, List[str]]:
+def gather(x: Union[ms.Tensor, List[object]]) -> Union[ms.Tensor, List[object]]:
     """
     Gather the tensor or list of str across all devices in the distributed environment.
     """

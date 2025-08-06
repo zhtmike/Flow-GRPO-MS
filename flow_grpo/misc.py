@@ -58,7 +58,7 @@ def init_sd3_debug_pipeline(model_path: str) -> StableDiffusion3PipelineWithSDEL
 def init_wan21_debug_pipeline(model_path: str) -> WanPipelineWithSDELogProb:
     """Init the pipeline with models containing only 1 layers for easier debugging & faster creating"""
     vae_config = AutoencoderKLWan.load_config(model_path, subfolder="vae")
-    vae_config["layers_per_block"] = 1
+    vae_config["num_res_blocks"] = 1
     vae = AutoencoderKLWan.from_config(vae_config)
 
     transformer_config = WanTransformer3DModel.load_config(

@@ -120,8 +120,14 @@ def evaluate(
         for k, v in rewards.items():
             all_rewards[k].extend(v)
 
+    # gather rewards across processes
+    gathered_rewards = {
+        key: gather(ms.tensor(value, dtype=ms.float32)).numpy()
+        for key, value in all_rewards.items()
+    }
+
     avg_rewards = dict()
-    for k, v in all_rewards.items():
+    for k, v in gathered_rewards.items():
         avg_rewards[k] = np.mean(v).item()
 
     logger.info(f"Validation rewards: {avg_rewards}")
