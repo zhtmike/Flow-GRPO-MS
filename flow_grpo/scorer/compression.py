@@ -58,7 +58,7 @@ class JpegImcompressibilityScorer(JpegCompressibilityScorer):
 
 class MP4CompressibilityScorer(Scorer):
 
-    def __init__(self, max_size: int = 10, fps: int = 15) -> None:
+    def __init__(self, max_size: int = 2, fps: int = 15) -> None:
         self.max_size = max_size
         self.fps = fps
 
@@ -78,7 +78,7 @@ class MP4CompressibilityScorer(Scorer):
                 # compressed mp4 file size (mb)
                 sizes.append(filesize / 1024 / 1024)
 
-        # 10 mb: score 0; 0 mb: score 1
+        # 2 mb: score 0; 0 mb: score 1
         rewards = [max(0.0, 1 - x / self.max_size) for x in sizes]
         return rewards
 
