@@ -712,7 +712,7 @@ def main():
     group.add_argument(
         "--num-steps",
         type=int,
-        default=30,
+        default=10,
         help="Number of steps to sample from the diffusion model during training stage",
     )
     group.add_argument(
@@ -765,7 +765,7 @@ def main():
         help="Number of inner epochs to train for",
     )
     group.add_argument(
-        "--train-batch-size", type=int, default=2, help="Batch size for training"
+        "--train-batch-size", type=int, default=5, help="Batch size for training"
     )
     group.add_argument(
         "--num-batches-per-epoch",
@@ -776,7 +776,7 @@ def main():
     group.add_argument(
         "--num-video-per-prompt",
         type=int,
-        default=4,
+        default=5,
         help="Number of videos to generate per prompt",
     )
     group.add_argument(
@@ -788,7 +788,7 @@ def main():
     group.add_argument(
         "--save-freq",
         type=int,
-        default=1,
+        default=2,
         help="Frequency of saving checkpoints during training",
     )
     group.add_argument(
@@ -834,12 +834,12 @@ def main():
         help="Guidance scale for classifier-free guidance",
     )
     group.add_argument(
-        "--test-batch-size", type=int, default=2, help="Batch size for evaluation"
+        "--test-batch-size", type=int, default=5, help="Batch size for evaluation"
     )
     group.add_argument(
         "--eval-freq",
         type=int,
-        default=1,
+        default=2,
         help="Frequency of evaluation during training",
     )
     group.add_argument(
@@ -851,7 +851,7 @@ def main():
     group.add_argument(
         "--validation-num",
         type=int,
-        default=8,
+        default=10,
         help="Number of validation samples to generate during evaluation",
     )
     group.add_argument(
