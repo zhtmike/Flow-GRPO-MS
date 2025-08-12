@@ -209,6 +209,10 @@ def train(args: argparse.Namespace):
     # enable recompute
     pipeline.transformer.enable_gradient_checkpointing()
 
+    # save memory
+    pipeline.vae.enable_tiling()
+    pipeline.vae.enable_slicing()
+
     if args.use_lora:
         # Set correct lora layers
         target_modules = [
