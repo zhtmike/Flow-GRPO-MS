@@ -206,12 +206,12 @@ def train(args: argparse.Namespace):
     pipeline.vae.to(ms.float32)
     pipeline.text_encoder.to(inference_dtype)
 
-    # enable recompute
-    pipeline.transformer.enable_gradient_checkpointing()
+    if args.recompute:
+        pipeline.transformer.enable_gradient_checkpointing()
 
-    # save memory
-    pipeline.vae.enable_tiling()
-    pipeline.vae.enable_slicing()
+    if args.vae_save_memory:
+        pipeline.vae.enable_tiling()
+        pipeline.vae.enable_slicing()
 
     if args.use_lora:
         # Set correct lora layers
@@ -827,6 +827,18 @@ def main():
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether to use global standard deviation for rewards",
+    )
+    group.add_argument(
+        "--recompute",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use recompute",
+    )
+    group.add_argument(
+        "--vae-save-memory",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to enable vae slicing & tiling to save memory",
     )
 
     # ========== sampling arguments ===========

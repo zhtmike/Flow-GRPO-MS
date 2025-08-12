@@ -31,15 +31,17 @@ msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts
     --reward jpeg-imcompressibility \
     --model $SD3_PATH
 
-# training wan2.1 with two cards (oom)
+# training wan2.1 with two cards
 # msrun --worker_num 2 --local_worker_num 2 --master_port 9527 --join True scripts/train_wan21.py \
-#     --reward mp4-imcompressibility \
+#     --reward frame-smoothness \
 #     --model $WAN21_PATH
 
-# training wan2.1 with two cards (experimental)
-# msrun --worker_num 2 --local_worker_num 2 --master_port 9527 --join True scripts/train_wan21.py \
-#     --reward mp4-imcompressibility \
-#     --model $WAN21_PATH \
-#     --width 400 \
-#     --height 400 \
-#     --num-frames 25
+# training wan2.1 with two cards (for quick experiment)
+msrun --worker_num 2 --local_worker_num 2 --master_port 9527 --join True scripts/train_wan21.py \
+    --reward frame-smoothness \
+    --model $WAN21_PATH \
+    --width 400 \
+    --height 400 \
+    --num-frames 25 \
+    --num-steps 40 \
+    --no-vae-save-memory

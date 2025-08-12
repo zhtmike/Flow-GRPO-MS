@@ -18,10 +18,10 @@ class FrameSmoothnessScorer(Scorer):
             if isinstance(video, ms.Tensor):
                 video = video.numpy()
 
-            result = np.diff(video, axis=0)
+            result = np.diff(video.astype(np.float32), axis=0)
             result = result.reshape(result.shape[0], -1)
             result = np.linalg.norm(result, axis=1) / result.shape[1] ** 0.5
-            result = result.max()
+            result = result.mean()
             diffs.append(result)
 
         rewards = [x / 255 for x in diffs]
