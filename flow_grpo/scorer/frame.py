@@ -6,7 +6,7 @@ import numpy as np
 from ._scorer import Scorer
 
 
-class MotionSmoothnessScorer(Scorer):
+class FrameSmoothnessScorer(Scorer):
 
     def __call__(
         self,
@@ -21,19 +21,19 @@ class MotionSmoothnessScorer(Scorer):
             result = np.diff(video, axis=0)
             result = result.reshape(result.shape[0], -1)
             result = np.linalg.norm(result, axis=1) / result.shape[1] ** 0.5
-            result = result.max()  # suppress the sudden change frame
+            result = result.max()
             diffs.append(result)
 
-        rewards = [1.0 - x / 255 for x in diffs]
+        rewards = [x / 255 for x in diffs]
         return rewards
 
 
-def test_motion_smoothness_scorer():
-    scorer = MotionSmoothnessScorer()
+def test_frame_smoothness_scorer():
+    scorer = FrameSmoothnessScorer()
     videos = ["assets/video.npy"]
     np_videos = [np.load(video) for video in videos]
     print(scorer(videos=np_videos))
 
 
 if __name__ == "__main__":
-    test_motion_smoothness_scorer()
+    test_frame_smoothness_scorer()
