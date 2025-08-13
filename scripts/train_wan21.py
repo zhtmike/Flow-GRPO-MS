@@ -224,6 +224,8 @@ def train(args: argparse.Namespace):
             "attn2.to_k",
             "attn2.to_v",
             "attn2.to_out.0",
+            "ffn.net.0.proj",
+            "ffn.net.2",
         ]
         transformer_lora_config = LoraConfig(
             r=32,

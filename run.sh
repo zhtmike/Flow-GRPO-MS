@@ -43,5 +43,7 @@ msrun --worker_num 2 --local_worker_num 2 --master_port 9527 --join True scripts
     --width 400 \
     --height 400 \
     --num-frames 25 \
-    --num-steps 40 \
-    --no-vae-save-memory
+    --num-steps 50 \
+    --eval-freq 1 \
+    --no-vae-save-memory \
+    --no-eval-with-default-scheduler
