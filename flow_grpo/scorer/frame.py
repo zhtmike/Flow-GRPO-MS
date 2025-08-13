@@ -7,6 +7,8 @@ from ._scorer import Scorer
 
 
 class FrameSmoothnessScorer(Scorer):
+    def __init__(self, frame_stride: int = 4) -> None:
+        self.frame_stride = frame_stride
 
     def __call__(
         self,
@@ -17,8 +19,10 @@ class FrameSmoothnessScorer(Scorer):
         for video in videos:
             if isinstance(video, ms.Tensor):
                 video = video.numpy()
+            assert video.shape[0] >= self.frame_stride * 2
 
-            result = np.diff(video.astype(np.float32), axis=0)
+            video = video[:: self.frame_stride].astype(np.float32)
+            result = np.diff(video, axis=0)
             result = result.reshape(result.shape[0], -1)
             result = np.linalg.norm(result, axis=1) / result.shape[1] ** 0.5
             result = result.mean()

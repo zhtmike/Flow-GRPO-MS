@@ -21,7 +21,7 @@ export TOKENIZERS_PARALLELISM=False
 # test with single scorer
 # python -m flow_grpo.scorer.multi
 # python -m flow_grpo.scorer.qwenvl
-# python -m flow_grpo.scorer.compression
+# python -m flow_grpo.scorer.frame
 # python -m flow_grpo.scorer.aesthetic
 # python -m flow_grpo.scorer.pickscore
 # python -m flow_grpo.scorer.vllm
