@@ -13,7 +13,7 @@ AVAILABLE_SCORERS = {
     "aesthetic": ("aesthetic", "AestheticScorer"),
     "jpeg-compressibility": ("compression", "JpegCompressibilityScorer"),
     "jpeg-imcompressibility": ("compression", "JpegImcompressibilityScorer"),
-    "frame-smoothness": ("frame", "FrameSmoothnessScorer"),
+    "constrast-change": ("misc", "ContrastChangeScorer"),
     "mp4-compressibility": ("compression", "MP4CompressibilityScorer"),
     "mp4-imcompressibility": ("compression", "MP4ImcompressibilityScorer"),
     "pickscore": ("pickscore", "PickScoreScorer"),

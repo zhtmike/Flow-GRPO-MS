@@ -6,8 +6,8 @@ import numpy as np
 from ._scorer import Scorer
 
 
-class FrameSmoothnessScorer(Scorer):
-    def __init__(self, frame_stride: int = 4) -> None:
+class ContrastChangeScorer(Scorer):
+    def __init__(self, frame_stride: int = 8) -> None:
         self.frame_stride = frame_stride
 
     def __call__(
@@ -19,7 +19,7 @@ class FrameSmoothnessScorer(Scorer):
         for video in videos:
             if isinstance(video, ms.Tensor):
                 video = video.numpy()
-            assert video.shape[0] >= self.frame_stride * 2
+            assert video.shape[0] > self.frame_stride
 
             video = video[:: self.frame_stride].astype(np.float32)
             result = np.diff(video, axis=0)
@@ -32,12 +32,13 @@ class FrameSmoothnessScorer(Scorer):
         return rewards
 
 
-def test_frame_smoothness_scorer():
-    scorer = FrameSmoothnessScorer()
-    videos = ["assets/video.npy"]
-    np_videos = [np.load(video) for video in videos]
+def test_contrast_change_scorer():
+    scorer = ContrastChangeScorer()
+    videos = np.zeros((9, 224, 224, 3), dtype=np.uint8)
+    videos[0] = 255
+    np_videos = [videos]
     print(scorer(videos=np_videos))
 
 
 if __name__ == "__main__":
-    test_frame_smoothness_scorer()
+    test_contrast_change_scorer()

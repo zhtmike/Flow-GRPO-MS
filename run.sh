@@ -21,10 +21,10 @@ export TOKENIZERS_PARALLELISM=False
 # test with single scorer
 # python -m flow_grpo.scorer.multi
 # python -m flow_grpo.scorer.qwenvl
-# python -m flow_grpo.scorer.frame
 # python -m flow_grpo.scorer.aesthetic
 # python -m flow_grpo.scorer.pickscore
 # python -m flow_grpo.scorer.vllm
+# python -m flow_grpo.scorer.misc
 
 # training sd3 with one card
 msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts/train_sd3.py \
@@ -38,7 +38,7 @@ msrun --worker_num 1 --local_worker_num 1 --master_port 9527 --join True scripts
 
 # training wan2.1 with two cards (for quick experiment)
 msrun --worker_num 2 --local_worker_num 2 --master_port 9527 --join True scripts/train_wan21.py \
-    --reward frame-smoothness \
+    --reward constrast-change \
     --model $WAN21_PATH \
     --width 400 \
     --height 400 \
