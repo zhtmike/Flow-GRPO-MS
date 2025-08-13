@@ -15,7 +15,7 @@ class ContrastChangeScorer(Scorer):
         videos: Union[List[np.ndarray], List[ms.Tensor]],
         prompts: Optional[List[str]] = None,
     ) -> List[float]:
-        diffs = []
+        rewards = []
         for video in videos:
             if isinstance(video, ms.Tensor):
                 video = video.numpy()
@@ -26,9 +26,8 @@ class ContrastChangeScorer(Scorer):
             result = result.reshape(result.shape[0], -1)
             result = np.linalg.norm(result, axis=1) / result.shape[1] ** 0.5
             result = result.mean()
-            diffs.append(result)
+            rewards.append(result)
 
-        rewards = [x / 255 for x in diffs]
         return rewards
 
 
